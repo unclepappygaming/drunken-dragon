@@ -1,0 +1,21 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/tavern_grid.gd" id="2_grid"]
+[ext_resource type="Script" path="res://scripts/hud.gd" id="3_hud"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="TavernGrid" type="Node2D" parent="."]
+position = Vector2(40, 175)
+script = ExtResource("2_grid")
+
+[node name="Customers" type="Node2D" parent="."]
+
+[node name="SpawnTimer" type="Timer" parent="."]
+wait_time = 5.0
+one_shot = true
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("3_hud")

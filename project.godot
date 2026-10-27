@@ -1,0 +1,37 @@
+; Engine configuration file.
+; Godot reads this when you open the folder as a project.
+; You normally edit these through Project > Project Settings, but it's plain text.
+
+config_version=5
+
+[application]
+
+config/name="The Drunken Dragon"
+; The scene Godot runs when you press Play (F5).
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.4", "Mobile")
+
+[autoload]
+
+; AUTOLOAD: Godot creates this script once at startup and keeps it alive
+; across the whole game. Any script can reach it by name: GameManager.gold
+; The "*" means "add it as a node in the scene tree" (so _process runs).
+GameManager="*res://scripts/game_manager.gd"
+
+[display]
+
+; The game is designed for a 720x1280 portrait phone screen.
+window/size/viewport_width=720
+window/size/viewport_height=1280
+; On your PC, the test window opens smaller so it fits your monitor.
+window/size/window_width_override=405
+window/size/window_height_override=720
+; 1 = portrait. Locks the phone to portrait when you export to Android.
+window/handheld/orientation=1
+; Scale everything to fit any phone's resolution.
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[rendering]
+
+renderer/rendering_method="mobile"
