@@ -13,6 +13,8 @@ script = ExtResource("2_grid")
 
 [node name="Customers" type="Node2D" parent="."]
 
+[node name="Staff" type="Node2D" parent="."]
+
 [node name="SpawnTimer" type="Timer" parent="."]
 wait_time = 5.0
 one_shot = true

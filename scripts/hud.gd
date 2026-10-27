@@ -13,14 +13,19 @@ extends CanvasLayer
 
 signal build_selected(type: String)     # "table", "kitchen", "remove" or ""
 signal day_start_requested
+signal staff_change_requested(role: String, change: int)   # "cook"/"waiter", +1 or -1
+signal new_game_requested
 
 var _gold_label: Label
 var _fame_label: Label
 var _clock_label: Label
+var _staff_label: Label
 var _hint_label: Label
 var _summary_panel: PanelContainer
 var _summary_label: Label
 var _summary_button: Button
+var _new_game_button: Button
+var _new_game_armed: bool = false   # true after the first tap
 
 var _current_hint: String = "Tap a build button to place furniture."
 var _message_time_left: float = 0.0
@@ -60,9 +65,17 @@ func show_message(text: String) -> void:
 	_message_time_left = 2.0
 
 
-func show_summary(text: String, button_text: String) -> void:
+func set_staff(cooks: int, waiters: int, wages: int) -> void:
+	_staff_label.text = "Cooks %d  Waiters %d  Wages %dg/day" % [cooks, waiters, wages]
+
+
+# allow_new_game shows a "New Game" button under the main one.
+func show_summary(text: String, button_text: String, allow_new_game: bool = false) -> void:
 	_summary_label.text = text
 	_summary_button.text = button_text
+	_new_game_button.visible = allow_new_game
+	_new_game_armed = false
+	_new_game_button.text = "New Game"
 	_summary_panel.visible = true
 
 
@@ -71,6 +84,8 @@ func show_summary(text: String, button_text: String) -> void:
 # ---------------------------------------------------------------------
 func _on_gold_changed(amount: int) -> void:
 	_gold_label.text = "Gold: %d" % amount
+	# Red when in debt.
+	_gold_label.modulate = Color(1.0, 0.45, 0.45) if amount < 0 else Color.WHITE
 
 
 func _on_fame_changed(amount: int) -> void:
@@ -100,6 +115,15 @@ func _on_build_button(type: String) -> void:
 func _on_summary_button() -> void:
 	_summary_panel.visible = false
 	day_start_requested.emit()
+
+
+# Erasing a save can't be undone, so it takes two taps.
+func _on_new_game_button() -> void:
+	if not _new_game_armed:
+		_new_game_armed = true
+		_new_game_button.text = "Tap again to erase your tavern"
+		return
+	new_game_requested.emit()
 
 
 # ---------------------------------------------------------------------
@@ -134,8 +158,13 @@ func _build_top_bar() -> void:
 	_fame_label = _make_label(34)
 	row.add_child(_fame_label)
 
+	var row2 := HBoxContainer.new()
+	vbox.add_child(row2)
 	_clock_label = _make_label(30)
-	vbox.add_child(_clock_label)
+	_clock_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row2.add_child(_clock_label)
+	_staff_label = _make_label(22)
+	row2.add_child(_staff_label)
 
 	_hint_label = _make_label(24)
 	_hint_label.text = _current_hint
@@ -149,29 +178,50 @@ func _build_bottom_bar() -> void:
 	panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	panel.offset_left = 0
 	panel.offset_right = 0
-	panel.offset_top = -190
+	panel.offset_top = -230
 	panel.offset_bottom = 0
 
-	var row := HBoxContainer.new()
-	panel.add_child(row)
+	var rows := VBoxContainer.new()
+	panel.add_child(rows)
 
-	# [button text, build type]
-	var buttons: Array = [
+	# Top row: building. [button text, build type]
+	var build_row := HBoxContainer.new()
+	rows.add_child(build_row)
+	var build_buttons: Array = [
 		["Table\n50g", "table"],
 		["Hearth\n120g", "kitchen"],
 		["Sell", "remove"],
 		["Done", ""],
 	]
-	for entry in buttons:
-		var button := Button.new()
-		button.text = entry[0]
-		button.add_theme_font_size_override("font_size", 28)
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.custom_minimum_size = Vector2(0, 150)
-		row.add_child(button)
+	for entry in build_buttons:
+		var button := _make_button(entry[0], 26, build_row)
 		# .bind() attaches an extra argument, so one function can handle
 		# all four buttons and still know which one was pressed.
 		button.pressed.connect(_on_build_button.bind(entry[1]))
+
+	# Bottom row: staff. [button text, role, +1 hire / -1 let go]
+	var staff_row := HBoxContainer.new()
+	rows.add_child(staff_row)
+	var staff_buttons: Array = [
+		["Hire Cook\n%dg/day" % GameManager.STAFF["cook"]["wage"], "cook", 1],
+		["Fire\nCook", "cook", -1],
+		["Hire Waiter\n%dg/day" % GameManager.STAFF["waiter"]["wage"], "waiter", 1],
+		["Fire\nWaiter", "waiter", -1],
+	]
+	for entry in staff_buttons:
+		var button := _make_button(entry[0], 22, staff_row)
+		# You can bind more than one argument.
+		button.pressed.connect(staff_change_requested.emit.bind(entry[1], entry[2]))
+
+
+func _make_button(text: String, font_size: int, parent: Control) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.add_theme_font_size_override("font_size", font_size)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.custom_minimum_size = Vector2(0, 105)
+	parent.add_child(button)
+	return button
 
 
 func _build_summary_panel() -> void:
@@ -199,3 +249,10 @@ func _build_summary_panel() -> void:
 	_summary_button.custom_minimum_size = Vector2(0, 110)
 	_summary_button.pressed.connect(_on_summary_button)
 	vbox.add_child(_summary_button)
+
+	_new_game_button = Button.new()
+	_new_game_button.add_theme_font_size_override("font_size", 24)
+	_new_game_button.custom_minimum_size = Vector2(0, 80)
+	_new_game_button.pressed.connect(_on_new_game_button)
+	_new_game_button.visible = false
+	vbox.add_child(_new_game_button)

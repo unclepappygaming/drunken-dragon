@@ -1,0 +1,4 @@
+# Godot's cache. It rebuilds this itself whenever you open the project.
+.godot/
+# Exported builds live outside the project, but just in case.
+*.tmp
