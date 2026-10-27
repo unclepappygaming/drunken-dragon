@@ -2,7 +2,7 @@
 # game_manager.gd  —  AUTOLOAD (registered in project.godot)
 #
 # Holds everything that's "global" about the tavern: gold, fame, the
-# day/clock, the menu, furniture prices, staff wages, the two lines
+# day/clock, recipes and today's menu, furniture prices, staff wages, the two lines
 # guests wait in (for a waiter, then for a cook), and saving/loading.
 #
 # Other scripts never change gold directly — they call try_spend() or
@@ -22,6 +22,7 @@ signal fame_changed(new_amount: int)
 signal clock_changed(hour: int, minute: int)
 signal shop_opened(day: int)
 signal shop_closed(day: int)
+signal recipes_changed   # a recipe was learned or the menu changed
 
 # ---------------------------------------------------------------------
 # TUNING CONSTANTS — tweak these to change how the game feels.
@@ -36,7 +37,8 @@ const STARTING_GOLD: int = 200
 # phone it's private app storage; in a web browser it's browser storage.
 const SAVE_PATH: String = "user://save.json"
 # Bump this if the save format ever changes, so old saves can be handled.
-const SAVE_VERSION: int = 1
+# Version 2 added recipes and the menu. Version 1 saves still load.
+const SAVE_VERSION: int = 2
 
 # Everything the player can build. The key ("table") is the ID the
 # other scripts use; the inner Dictionary holds its details.
@@ -51,12 +53,25 @@ const STAFF: Dictionary = {
 	"waiter": {"name": "Waiter", "wage": 20},
 }
 
-# The menu. Milestone 3 replaces this with recipes you research.
-const MENU: Array = [
-	{"name": "Dragon Ale", "price": 12, "cook_time": 2.5},
-	{"name": "Mushroom Stew", "price": 18, "cook_time": 4.0},
-	{"name": "Roast Boar", "price": 28, "cook_time": 6.0},
-]
+# Every dish the tavern could ever serve. The key ("ale") is the ID.
+#   tier 1-2: what common folk order
+#   tier 3:   fancy dishes only nobles order
+#   learn:    gold it costs to learn the recipe (0 = known from the start)
+# Pricier dishes earn more per guest but keep a Hearth busy longer.
+const RECIPES: Dictionary = {
+	"ale":     {"name": "Dragon Ale",       "price": 12, "cook_time": 2.5,  "tier": 1, "learn": 0},
+	"stew":    {"name": "Mushroom Stew",    "price": 18, "cook_time": 4.0,  "tier": 1, "learn": 0},
+	"mead":    {"name": "Honey Mead",       "price": 16, "cook_time": 3.0,  "tier": 1, "learn": 80},
+	"boar":    {"name": "Roast Boar",       "price": 28, "cook_time": 6.0,  "tier": 2, "learn": 0},
+	"cheese":  {"name": "Troll Cheese",     "price": 24, "cook_time": 4.0,  "tier": 2, "learn": 150},
+	"wings":   {"name": "Wyvern Wings",     "price": 34, "cook_time": 6.5,  "tier": 2, "learn": 250},
+	"wine":    {"name": "Elven Wine",       "price": 45, "cook_time": 5.0,  "tier": 3, "learn": 300},
+	"phoenix": {"name": "Phoenix Roast",    "price": 60, "cook_time": 9.0,  "tier": 3, "learn": 450},
+	"feast":   {"name": "Dragonfire Feast", "price": 85, "cook_time": 12.0, "tier": 3, "learn": 700},
+}
+const STARTER_RECIPES: Array[String] = ["ale", "stew", "boar"]
+const MAX_MENU: int = 4          # dishes on the menu at once
+const NOBLE_FAME: int = 25       # nobles start visiting at this much fame
 
 # ---------------------------------------------------------------------
 # GAME STATE
@@ -68,11 +83,17 @@ var is_open: bool = false
 var minutes_since_open: float = 0.0
 var _last_minute_shown: int = -1
 
+# Recipe IDs you know, and the ones on today's menu (always some of
+# the known ones). .duplicate() makes a copy so the constant stays as-is.
+var known_recipes: Array[String] = STARTER_RECIPES.duplicate()
+var menu: Array[String] = STARTER_RECIPES.duplicate()
+
 # Stats for the end-of-day summary (reset every morning).
 var today_income: int = 0
 var today_served: int = 0
 var today_walkouts: int = 0
 var today_turned_away: int = 0   # arrived but found no free table
+var today_nobles_served: int = 0
 
 # Customers waiting for a Waiter to come and take their order.
 # Array[Customer] is a TYPED array: Godot will refuse anything that
@@ -112,6 +133,7 @@ func open_shop() -> void:
 	today_served = 0
 	today_walkouts = 0
 	today_turned_away = 0
+	today_nobles_served = 0
 	shop_opened.emit(day)
 
 
@@ -143,6 +165,9 @@ func reset() -> void:
 	today_served = 0
 	today_walkouts = 0
 	today_turned_away = 0
+	today_nobles_served = 0
+	known_recipes = STARTER_RECIPES.duplicate()
+	menu = STARTER_RECIPES.duplicate()
 	order_requests.clear()
 	order_queue.clear()
 
@@ -154,7 +179,8 @@ func reset() -> void:
 # dishes or guests mid-walk to store.
 #
 # The save is a JSON text file, so you can open it and read it.
-# main.gd supplies the furniture and staff; we add gold, fame and day.
+# main.gd supplies the furniture and staff; we add gold, fame, day and
+# recipes.
 # ---------------------------------------------------------------------
 func save_game(layout: Array, cooks: int, waiters: int) -> void:
 	var data: Dictionary = {
@@ -165,6 +191,8 @@ func save_game(layout: Array, cooks: int, waiters: int) -> void:
 		"furniture": layout,
 		"cooks": cooks,
 		"waiters": waiters,
+		"recipes": known_recipes,
+		"menu": menu,
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file == null:
@@ -183,16 +211,36 @@ func load_game() -> Dictionary:
 		return {}
 	var parsed = JSON.parse_string(FileAccess.get_file_as_string(SAVE_PATH))
 	# A damaged or unknown file is ignored rather than crashing the game.
-	if typeof(parsed) != TYPE_DICTIONARY or parsed.get("version") != SAVE_VERSION:
+	if typeof(parsed) != TYPE_DICTIONARY:
 		push_warning("Save file unreadable, starting a new game.")
 		return {}
 	# JSON stores every number as a decimal, so turn them back into ints.
+	var version: int = int(parsed.get("version", 0))
+	if version < 1 or version > SAVE_VERSION:
+		push_warning("Save file from an unknown version, starting a new game.")
+		return {}
 	day = int(parsed.get("day", 0))
 	gold = int(parsed.get("gold", STARTING_GOLD))
 	fame = int(parsed.get("fame", 0))
+	# Version 1 saves have no recipes, so they get the starter ones.
+	_load_recipes(parsed.get("recipes", []), parsed.get("menu", []))
 	gold_changed.emit(gold)
 	fame_changed.emit(fame)
 	return parsed
+
+
+# Only accept recipe IDs that really exist, in case the file was edited.
+func _load_recipes(saved_known: Array, saved_menu: Array) -> void:
+	known_recipes = STARTER_RECIPES.duplicate()
+	for id in saved_known:
+		if RECIPES.has(id) and not known_recipes.has(id):
+			known_recipes.append(id)
+	menu.clear()
+	for id in saved_menu:
+		if known_recipes.has(id) and not menu.has(id) and menu.size() < MAX_MENU:
+			menu.append(id)
+	if menu.is_empty():
+		menu = STARTER_RECIPES.duplicate()
 
 
 func delete_save() -> void:
@@ -225,6 +273,63 @@ func next_order_request() -> Customer:
 		if is_instance_valid(c) and c.state == Customer.State.WAITING_FOR_WAITER:
 			return c
 	return null
+
+
+# ---------------------------------------------------------------------
+# RECIPES AND THE MENU
+# These return a message for the HUD to show ("" = nothing to say).
+# ---------------------------------------------------------------------
+func learn_recipe(id: String) -> String:
+	var recipe: Dictionary = RECIPES[id]
+	if known_recipes.has(id):
+		return ""
+	if not try_spend(recipe["learn"]):
+		return "Not enough gold to learn %s." % recipe["name"]
+	known_recipes.append(id)
+	# Straight onto the menu if there's a free slot.
+	if menu.size() < MAX_MENU:
+		menu.append(id)
+	recipes_changed.emit()
+	return "Learned %s!" % recipe["name"]
+
+
+func toggle_menu(id: String) -> String:
+	if menu.has(id):
+		if menu.size() <= 1:
+			return "Keep at least one dish on the menu."
+		menu.erase(id)
+	else:
+		if menu.size() >= MAX_MENU:
+			return "The menu is full. Take a dish off first."
+		menu.append(id)
+	recipes_changed.emit()
+	return ""
+
+
+# Does today's menu have anything for this kind of guest?
+func menu_suits(noble: bool) -> bool:
+	return not pick_order(noble).is_empty()
+
+
+# A guest chooses a dish from today's menu. Nobles only order tier 3
+# dishes; common folk only order tier 1-2. Empty if nothing suits them.
+func pick_order(noble: bool) -> Dictionary:
+	var choices: Array = []
+	for id in menu:
+		var recipe: Dictionary = RECIPES[id]
+		if (recipe["tier"] == 3) == noble:
+			choices.append(recipe)
+	if choices.is_empty():
+		return {}
+	return choices.pick_random()
+
+
+# The chance that a new guest is a noble: none below NOBLE_FAME, then
+# 10%, growing with fame up to 35%.
+func noble_chance() -> float:
+	if fame < NOBLE_FAME:
+		return 0.0
+	return minf(0.35, 0.1 + (fame - NOBLE_FAME) * 0.01)
 
 
 func change_fame(amount: int) -> void:

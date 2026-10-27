@@ -26,6 +26,9 @@ var _summary_label: Label
 var _summary_button: Button
 var _new_game_button: Button
 var _new_game_armed: bool = false   # true after the first tap
+var _recipe_panel: PanelContainer
+var _recipe_header: Label
+var _recipe_list: VBoxContainer
 
 var _current_hint: String = "Tap a build button to place furniture."
 var _message_time_left: float = 0.0
@@ -35,6 +38,7 @@ func _ready() -> void:
 	_build_top_bar()
 	_build_bottom_bar()
 	_build_summary_panel()
+	_build_recipe_panel()
 
 	# CONNECTING SIGNALS: "when GameManager emits gold_changed, run my
 	# _on_gold_changed function". The signal passes along the new amount.
@@ -42,6 +46,7 @@ func _ready() -> void:
 	GameManager.fame_changed.connect(_on_fame_changed)
 	GameManager.clock_changed.connect(_on_clock_changed)
 	GameManager.shop_opened.connect(_on_shop_opened)
+	GameManager.recipes_changed.connect(_refresh_recipes)
 
 	# Show the starting values.
 	_on_gold_changed(GameManager.gold)
@@ -115,6 +120,29 @@ func _on_build_button(type: String) -> void:
 func _on_summary_button() -> void:
 	_summary_panel.visible = false
 	day_start_requested.emit()
+
+
+func _on_recipes_button() -> void:
+	_summary_panel.visible = false
+	_recipe_panel.visible = true
+	_refresh_recipes()
+
+
+func _on_recipes_back() -> void:
+	_recipe_panel.visible = false
+	_summary_panel.visible = true
+
+
+func _on_learn_pressed(id: String) -> void:
+	var message: String = GameManager.learn_recipe(id)
+	if message != "":
+		show_message(message)
+
+
+func _on_menu_toggle_pressed(id: String) -> void:
+	var message: String = GameManager.toggle_menu(id)
+	if message != "":
+		show_message(message)
 
 
 # Erasing a save can't be undone, so it takes two taps.
@@ -230,16 +258,18 @@ func _build_summary_panel() -> void:
 	_summary_panel.set_anchors_preset(Control.PRESET_CENTER)
 	_summary_panel.offset_left = -290
 	_summary_panel.offset_right = 290
-	_summary_panel.offset_top = -260
-	_summary_panel.offset_bottom = 260
+	_summary_panel.offset_top = -300
+	_summary_panel.offset_bottom = 300
+	# If the text needs more room, grow up and down evenly, staying centered.
+	_summary_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_summary_panel.visible = false
 
 	var vbox := VBoxContainer.new()
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 30)
+	vbox.add_theme_constant_override("separation", 20)
 	_summary_panel.add_child(vbox)
 
-	_summary_label = _make_label(30)
+	_summary_label = _make_label(27)
 	_summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	_summary_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(_summary_label)
@@ -250,9 +280,116 @@ func _build_summary_panel() -> void:
 	_summary_button.pressed.connect(_on_summary_button)
 	vbox.add_child(_summary_button)
 
+	var recipes_button := Button.new()
+	recipes_button.text = "Menu & Recipes"
+	recipes_button.add_theme_font_size_override("font_size", 28)
+	recipes_button.custom_minimum_size = Vector2(0, 90)
+	recipes_button.pressed.connect(_on_recipes_button)
+	vbox.add_child(recipes_button)
+
 	_new_game_button = Button.new()
 	_new_game_button.add_theme_font_size_override("font_size", 24)
 	_new_game_button.custom_minimum_size = Vector2(0, 80)
 	_new_game_button.pressed.connect(_on_new_game_button)
 	_new_game_button.visible = false
 	vbox.add_child(_new_game_button)
+
+
+# The recipe book: every dish, with a button to learn it or to put it on
+# (or take it off) today's menu. Opened from the between-days screen.
+func _build_recipe_panel() -> void:
+	_recipe_panel = PanelContainer.new()
+	add_child(_recipe_panel)
+	# FULL_RECT = stretch to all four edges, then pull in from top and
+	# bottom so the gold/fame bar and the build buttons stay visible.
+	_recipe_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_recipe_panel.offset_left = 10
+	_recipe_panel.offset_right = -10
+	_recipe_panel.offset_top = 155
+	_recipe_panel.offset_bottom = -235
+	_recipe_panel.visible = false
+	# The default panel is see-through; a long list reads better on a
+	# solid background. A StyleBoxFlat is a plain colored box.
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color(0.14, 0.11, 0.09)
+	background.set_content_margin_all(12)
+	_recipe_panel.add_theme_stylebox_override("panel", background)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 12)
+	_recipe_panel.add_child(vbox)
+
+	_recipe_header = _make_label(26)
+	_recipe_header.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_recipe_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_recipe_header)
+
+	# A ScrollContainer shows part of its child and lets you drag to see
+	# the rest. Horizontal scrolling is off: rows always fit the width.
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vbox.add_child(scroll)
+	_recipe_list = VBoxContainer.new()
+	_recipe_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_recipe_list.add_theme_constant_override("separation", 10)
+	scroll.add_child(_recipe_list)
+
+	var back := Button.new()
+	back.text = "Back"
+	back.add_theme_font_size_override("font_size", 28)
+	back.custom_minimum_size = Vector2(0, 90)
+	back.pressed.connect(_on_recipes_back)
+	vbox.add_child(back)
+
+
+# Rebuilds every row. Simple, and with nine recipes it's instant.
+func _refresh_recipes() -> void:
+	if not _recipe_panel.visible:
+		return
+	for child in _recipe_list.get_children():
+		# remove_child first so the old row vanishes right away;
+		# queue_free deletes it safely once this button press is over.
+		_recipe_list.remove_child(child)
+		child.queue_free()
+
+	var header: String = "Today's menu: %d of %d dishes" % [GameManager.menu.size(), GameManager.MAX_MENU]
+	if not GameManager.menu_suits(false):
+		header += "\nCommon folk have nothing to order!"
+	if GameManager.fame >= GameManager.NOBLE_FAME and not GameManager.menu_suits(true):
+		header += "\nNobles are visiting, but nothing fancy is on the menu."
+	_recipe_header.text = header
+
+	for id in GameManager.RECIPES:
+		var recipe: Dictionary = GameManager.RECIPES[id]
+		var row := HBoxContainer.new()
+		_recipe_list.add_child(row)
+
+		var info := VBoxContainer.new()
+		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(info)
+		var name_label := _make_label(26)
+		name_label.text = recipe["name"]
+		info.add_child(name_label)
+		var who: String = "Common folk"
+		if recipe["tier"] == 3:
+			who = "Nobles only"
+			if GameManager.fame < GameManager.NOBLE_FAME:
+				who += " (from %d fame)" % GameManager.NOBLE_FAME
+		var details := _make_label(20)
+		details.text = "%dg   %.1fs to cook   %s" % [recipe["price"], recipe["cook_time"], who]
+		details.modulate = Color(0.8, 0.8, 0.8)
+		info.add_child(details)
+
+		var button := Button.new()
+		button.add_theme_font_size_override("font_size", 22)
+		button.custom_minimum_size = Vector2(180, 80)
+		if not GameManager.known_recipes.has(id):
+			button.text = "Learn\n%dg" % recipe["learn"]
+			button.pressed.connect(_on_learn_pressed.bind(id))
+		else:
+			var on_menu: bool = GameManager.menu.has(id)
+			button.text = "On menu" if on_menu else "Add to menu"
+			button.modulate = Color(0.6, 1.0, 0.6) if on_menu else Color.WHITE
+			button.pressed.connect(_on_menu_toggle_pressed.bind(id))
+		row.add_child(button)

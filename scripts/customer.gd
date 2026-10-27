@@ -8,6 +8,9 @@
 #                                    |                      |
 #                                    +-- patience runs out -+--> LEAVING (angry)
 #
+# Nobles (is_noble) only order fancy tier 3 dishes. Anyone who finds
+# nothing they like on today's menu leaves unhappy.
+#
 # Guests sit on a free square NEXT TO their table. A Waiter comes to
 # take the order, a Cook cooks it, and a Waiter carries it over.
 # Walking around furniture comes from walker.gd (see "extends Walker").
@@ -35,7 +38,8 @@ const EAT_TIME: float = 4.0
 
 var state: State = State.WALKING_IN
 var table_cell: Vector2i             # which grid square their table is on
-var order: Dictionary = {}           # one entry from GameManager.MENU
+var order: Dictionary = {}           # one entry from GameManager.RECIPES
+var is_noble: bool = false
 var patience: float = MAX_PATIENCE
 
 var _timer: float = 0.0
@@ -45,11 +49,13 @@ var _color: Color
 
 # Called by main.gd right after the guest is created. We can't pass
 # arguments to instantiate(), so a setup() function is the usual pattern.
-func setup(tavern_grid: TavernGrid, cell: Vector2i) -> void:
+func setup(tavern_grid: TavernGrid, cell: Vector2i, noble: bool = false) -> void:
 	_setup_walker(tavern_grid, tavern_grid.door_position())
 	speed = WALK_SPEED
 	table_cell = cell
-	_color = Color.from_hsv(randf(), 0.45, 0.95)   # random shirt color
+	is_noble = noble
+	# Nobles wear royal purple; everyone else gets a random shirt color.
+	_color = Color(0.5, 0.25, 0.7) if noble else Color.from_hsv(randf(), 0.45, 0.95)
 
 	# GROUPS are tags. Putting every guest in "customers" lets main.gd ask
 	# "how many guests are still here?" with one line, without keeping
@@ -71,7 +77,11 @@ func _process(delta: float) -> void:
 		State.DECIDING:
 			_timer -= delta
 			if _timer <= 0.0:
-				order = GameManager.MENU.pick_random()
+				order = GameManager.pick_order(is_noble)
+				if order.is_empty():
+					_bubble = "Nothing fancy enough!" if is_noble else "Nothing I like!"
+					_start_leaving(false)
+					return
 				_bubble = "Waiter!"
 				# Join the line. A free Waiter will come and take the order.
 				GameManager.order_requests.append(self)
@@ -136,6 +146,12 @@ func _start_leaving(happy: bool) -> void:
 func _draw() -> void:
 	draw_circle(Vector2(0, 0), 18.0, _color)                    # body
 	draw_circle(Vector2(0, -26), 11.0, Color(1.0, 0.85, 0.7))   # head
+	if is_noble:
+		# A gold crown: a polygon is a shape drawn from a list of corners.
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-10, -34), Vector2(10, -34), Vector2(10, -45), Vector2(5, -39),
+			Vector2(0, -47), Vector2(-5, -39), Vector2(-10, -45),
+		]), Color(1.0, 0.8, 0.2))
 
 	if state == State.WAITING_FOR_WAITER or state == State.WAITING_FOR_FOOD:
 		var ratio: float = patience / MAX_PATIENCE
