@@ -16,37 +16,37 @@ extends RefCounted
 # sheet that gets recolored; it must match tools/sprites/make_sprites.py.
 const TYPES: Dictionary = {
 	"chef": {
-		"role": "cook", "title": "Classic Chef", "wage": 30,
+		"role": "cook", "title": "Classic Chef", "wage": 42,
 		"trait": "Trained", "about": "Cooks every dish 25% faster.",
 		"hair_key": Color8(110, 70, 40),
 		"names": ["Pierre", "Odette", "Henri", "Margaux", "Gaston", "Celeste"],
 	},
 	"tavern_cook": {
-		"role": "cook", "title": "Tavern Cook", "wage": 25,
+		"role": "cook", "title": "Tavern Cook", "wage": 36,
 		"trait": "Hearty Portions", "about": "Dishes they cook earn 15% more gold.",
 		"hair_key": Color8(120, 80, 50),
 		"names": ["Bess", "Martha", "Tom", "Wilda", "Gareth", "Nan"],
 	},
 	"dwarf_cook": {
-		"role": "cook", "title": "Dwarf Cook", "wage": 27,
+		"role": "cook", "title": "Dwarf Cook", "wage": 38,
 		"trait": "Roast Master", "about": "Roasts (Boar, Wings, Phoenix, Feast) cook 40% faster.",
 		"hair_key": Color8(200, 110, 50),   # the beard
 		"names": ["Thrain", "Brunhild", "Dorna", "Gimrik", "Hilda", "Borin"],
 	},
 	"barkeep": {
-		"role": "waiter", "title": "Barkeep", "wage": 22,
+		"role": "waiter", "title": "Barkeep", "wage": 30,
 		"trait": "Smooth Talker", "about": "Guests get 10 more seconds of patience when they order.",
 		"hair_key": Color8(160, 100, 50),
 		"names": ["Edric", "Rowan", "Mira", "Callum", "Jory", "Fen"],
 	},
 	"maid": {
-		"role": "waiter", "title": "Serving Maid", "wage": 22,
+		"role": "waiter", "title": "Serving Maid", "wage": 30,
 		"trait": "Nimble", "about": "Walks 25% faster.",
 		"hair_key": Color8(180, 120, 60),
 		"names": ["Elsie", "Rosa", "Nell", "Ivy", "Greta", "Maud"],
 	},
 	"halfling": {
-		"role": "waiter", "title": "Halfling Server", "wage": 18,
+		"role": "waiter", "title": "Halfling Server", "wage": 25,
 		"trait": "Lucky", "about": "1 in 3 guests leaves a big tip (+50%). Short legs: walks 10% slower.",
 		"hair_key": Color8(95, 60, 35),
 		"names": ["Pip", "Tansy", "Rosie", "Tobo", "Lily", "Fennick"],
@@ -115,6 +115,14 @@ static func role_of(profile: Dictionary) -> String:
 
 static func wage(profile: Dictionary) -> int:
 	return TYPES[profile["type"]]["wage"]
+
+
+# What it costs up front to hire someone: a signing fee of a few days' pay.
+const SIGNING_DAYS: int = 4
+
+
+static func hiring_fee(profile: Dictionary) -> int:
+	return wage(profile) * SIGNING_DAYS
 
 
 # A ShaderMaterial that recolors the sheet with this person's colors.

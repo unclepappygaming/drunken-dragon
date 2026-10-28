@@ -22,7 +22,7 @@ extends Node2D
 const CUSTOMER_SCENE: PackedScene = preload("res://scenes/customer.tscn")
 const COOK_SCENE: PackedScene = preload("res://scenes/cook.tscn")
 const WAITER_SCENE: PackedScene = preload("res://scenes/waiter.tscn")
-const MAX_STAFF: int = 6   # per role
+const MAX_STAFF: int = 8   # per role
 const MAX_LINE: int = 5    # guests who will wait outside for a table
 const LINE_GAP: float = 46.0   # pixels between people in the line
 
@@ -65,6 +65,7 @@ func _ready() -> void:
 	camera.tapped.connect(grid.handle_tap)
 	spawn_timer.timeout.connect(_on_spawn_timer_timeout)
 	GameManager.shop_closed.connect(_on_shop_closed)
+	GameManager.rush_changed.connect(_on_rush_changed)
 	# Building or selling between days changes the save, so save again.
 	grid.layout_changed.connect(_save_if_closed)
 	GameManager.recipes_changed.connect(_save_if_closed)
@@ -327,6 +328,14 @@ func _on_expand_requested() -> void:
 	hud.close_expand_panel()
 
 
+# Rushes start straight away: guests already on the way come sooner.
+func _on_rush_changed(rush_name: String) -> void:
+	if rush_name == "":
+		return
+	hud.show_message("%s! Guests are pouring in." % rush_name, 4.0)
+	spawn_timer.start(minf(spawn_timer.time_left, GameManager.get_spawn_interval()))
+
+
 func _on_shop_closed(_day: int) -> void:
 	spawn_timer.stop()
 	hud.show_message("Closing time! Finishing last orders...")
@@ -356,12 +365,20 @@ func _on_hire_requested(role: String, index: int) -> void:
 	if get_tree().get_nodes_in_group(role + "s").size() >= MAX_STAFF:
 		hud.show_message("That's plenty of %ss!" % role)
 		return
+	var candidates: Array = GameManager.applicants(role)
+	if index >= candidates.size():
+		return
+	var fee: int = StaffProfiles.hiring_fee(candidates[index])
+	if not GameManager.try_spend(fee):
+		hud.show_message("Hiring costs %dg up front." % fee)
+		return
 	var profile: Dictionary = GameManager.take_applicant(role, index)
 	if profile.is_empty():
+		GameManager.refund(fee)
 		return
 	_hire(profile)
 	var info: Dictionary = StaffProfiles.TYPES[profile["type"]]
-	hud.show_message("Hired %s the %s (%dg/day)." % [profile["name"], info["title"], info["wage"]])
+	hud.show_message("Hired %s the %s for %dg (then %dg/day)." % [profile["name"], info["title"], fee, info["wage"]])
 	_update_staff_display()
 	_save_if_closed()
 
@@ -454,7 +471,8 @@ func _save_if_closed() -> void:
 
 func _show_day_summary() -> void:
 	var wages: int = GameManager.daily_wages(_staff_profiles())
-	GameManager.pay_wages(wages)
+	var ingredients: int = GameManager.today_ingredients
+	GameManager.pay_wages(wages + ingredients)
 	GameManager.finish_day()
 
 	# Tonight's fame: the review first, then the banquet result.
@@ -477,11 +495,12 @@ func _show_day_summary() -> void:
 	_announce_unlocks(GameManager.check_unlocks(), null)
 	_save_if_closed()
 
-	var text := "Day %d complete!\n\nIncome: %dg\nWages: -%dg\nProfit: %dg\n\nGuests served: %d (nobles: %d)\nWalk-outs: %d\nTurned away: %d" % [
+	var text := "Day %d complete!\n\nIncome: %dg\nIngredients: -%dg\nWages: -%dg\nProfit: %dg\n\nGuests served: %d (nobles: %d)\nWalk-outs: %d\nTurned away: %d" % [
 		GameManager.day,
 		GameManager.today_income,
+		ingredients,
 		wages,
-		GameManager.today_income - wages,
+		GameManager.today_income - ingredients - wages,
 		GameManager.today_served,
 		GameManager.today_nobles_served,
 		GameManager.today_walkouts,

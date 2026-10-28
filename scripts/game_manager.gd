@@ -23,6 +23,7 @@ signal clock_changed(hour: int, minute: int)
 signal shop_opened(day: int)
 signal shop_closed(day: int)
 signal recipes_changed   # a recipe was unlocked or the menu changed
+signal rush_changed(rush_name: String)   # a rush began ("" = it ended)
 
 # ---------------------------------------------------------------------
 # TUNING CONSTANTS — tweak these to change how the game feels.
@@ -46,8 +47,8 @@ const SAVE_VERSION: int = 7
 # Everything the player can build. The key ("table") is the ID the
 # other scripts use; the inner Dictionary holds its details.
 const FURNITURE: Dictionary = {
-	"table": {"name": "Table", "cost": 50, "color": Color(0.55, 0.36, 0.2)},
-	"kitchen": {"name": "Hearth", "cost": 120, "color": Color(0.7, 0.25, 0.15)},
+	"table": {"name": "Table", "cost": 100, "color": Color(0.55, 0.36, 0.2)},
+	"kitchen": {"name": "Hearth", "cost": 250, "color": Color(0.7, 0.25, 0.15)},
 }
 
 # Staff types, traits and wages live in staff_profiles.gd. Each day a few
@@ -62,28 +63,30 @@ const APPLICANTS_PER_ROLE: int = 3
 #               "patron" = a guest shares the idea
 #               "quest"  = a named task shown in the recipe book
 # Pricier dishes earn more per guest but keep a Hearth busy longer.
+# cost: what the ingredients cost, paid every night for each dish cooked
+# (even ones the guest left before eating).
 const RECIPES: Dictionary = {
-	"ale":     {"name": "Dragon Ale",       "price": 12, "cook_time": 2.5,  "tier": 1},
-	"stew":    {"name": "Mushroom Stew",    "price": 18, "cook_time": 4.0,  "tier": 1},
-	"mead":    {"name": "Honey Mead",       "price": 16, "cook_time": 3.0,  "tier": 1,
+	"ale":     {"name": "Dragon Ale",       "price": 10, "cost": 4, "cook_time": 2.5,  "tier": 1},
+	"stew":    {"name": "Mushroom Stew",    "price": 15, "cost": 6, "cook_time": 4.0,  "tier": 1},
+	"mead":    {"name": "Honey Mead",       "price": 13, "cost": 5, "cook_time": 3.0,  "tier": 1,
 			"unlock": {"by": "patron", "stat": "served", "goal": 20,
 				"task": "A regular may share it once you've served 20 guests",
 				"who": "A regular"}},
-	"boar":    {"name": "Roast Boar",       "price": 28, "cook_time": 6.0,  "tier": 2},
-	"cheese":  {"name": "Troll Cheese",     "price": 24, "cook_time": 4.0,  "tier": 2,
+	"boar":    {"name": "Roast Boar",       "price": 23, "cost": 9, "cook_time": 6.0,  "tier": 2},
+	"cheese":  {"name": "Troll Cheese",     "price": 20, "cost": 7, "cook_time": 4.0,  "tier": 2,
 			"unlock": {"by": "quest", "stat": "dish:stew", "goal": 12,
 				"title": "The Bridge Troll", "task": "Serve 12 Mushroom Stews"}},
-	"wings":   {"name": "Wyvern Wings",     "price": 34, "cook_time": 6.5,  "tier": 2,
+	"wings":   {"name": "Wyvern Wings",     "price": 28, "cost": 10, "cook_time": 6.5,  "tier": 2,
 			"unlock": {"by": "quest", "stat": "perfect_days", "goal": 1,
 				"title": "Hunter's Challenge", "task": "Finish a day with no walk-outs and 20+ guests served"}},
-	"wine":    {"name": "Elven Wine",       "price": 45, "cook_time": 5.0,  "tier": 3,
+	"wine":    {"name": "Elven Wine",       "price": 38, "cost": 13, "cook_time": 5.0,  "tier": 3,
 			"unlock": {"by": "patron", "stat": "best_fame", "goal": 25,
 				"task": "A noble's steward may share it when your fame reaches 25",
 				"who": "A noble's steward"}},
-	"phoenix": {"name": "Phoenix Roast",    "price": 60, "cook_time": 9.0,  "tier": 3,
+	"phoenix": {"name": "Phoenix Roast",    "price": 50, "cost": 16, "cook_time": 9.0,  "tier": 3,
 			"unlock": {"by": "quest", "stat": "nobles", "goal": 8,
 				"title": "Noble Approval", "task": "Serve 8 nobles"}},
-	"feast":   {"name": "Dragonfire Feast", "price": 85, "cook_time": 12.0, "tier": 3,
+	"feast":   {"name": "Dragonfire Feast", "price": 70, "cost": 22, "cook_time": 12.0, "tier": 3,
 			"unlock": {"by": "quest", "stat": "dish:phoenix", "goal": 10,
 				"title": "A Feast for a Dragon", "task": "Serve 10 Phoenix Roasts"}},
 }
@@ -93,12 +96,21 @@ const MAX_MENU: int = 4          # dishes on the menu at once
 # host a banquet (from the Open Day button): pay BANQUET_COST and a party
 # of nobles arrives between BANQUET_START and BANQUET_END (24h clock).
 const NOBLE_FAME: int = 25
-const BANQUET_COST: int = 150
+const BANQUET_COST: int = 250
 const BANQUET_EVERY: int = 3     # days between banquets
 const BANQUET_START: int = 12
 const BANQUET_END: int = 15
 const NOBLE_TIP: float = 0.5        # nobles pay 50% on top
 const PERFECT_DAY_GUESTS: int = 20   # guests needed for a "perfect day"
+
+# RUSH HOURS: guests arrive `busy` times as often between `start` and
+# `end` (24h clock). Mornings before QUIET_UNTIL are quieter than usual.
+const RUSHES: Array = [
+	{"name": "Lunch rush", "start": 12, "end": 14, "busy": 1.7},
+	{"name": "Dinner rush", "start": 18, "end": 20, "busy": 2.0},
+]
+const QUIET_UNTIL: int = 11
+const QUIET_BUSY: float = 0.7
 
 # ---------------------------------------------------------------------
 # FAME
@@ -150,13 +162,13 @@ const RANKS: Array = [
 # Making the tavern bigger, one step at a time. Each step's quest has to
 # be done before you can pay for it. cols/rows = floor size afterwards.
 const EXPANSIONS: Array = [
-	{"cols": 10, "rows": 10, "cost": 300, "stat": "served", "goal": 60,
+	{"cols": 10, "rows": 10, "cost": 800, "stat": "served", "goal": 60,
 		"title": "Room to Grow", "task": "Serve 60 guests"},
-	{"cols": 10, "rows": 12, "cost": 500, "stat": "best_fame", "goal": 30,
+	{"cols": 10, "rows": 12, "cost": 1800, "stat": "best_fame", "goal": 30,
 		"title": "Talk of the Town", "task": "Reach 30 fame"},
-	{"cols": 12, "rows": 12, "cost": 800, "stat": "nobles", "goal": 15,
+	{"cols": 12, "rows": 12, "cost": 3000, "stat": "nobles", "goal": 15,
 		"title": "Fit for Nobles", "task": "Serve 15 nobles"},
-	{"cols": 12, "rows": 14, "cost": 1200, "stat": "perfect_days", "goal": 2,
+	{"cols": 12, "rows": 14, "cost": 4500, "stat": "perfect_days", "goal": 2,
 		"title": "The Grand Hall", "task": "Have 2 perfect days (no walk-outs, 20+ guests)"},
 ]
 
@@ -169,6 +181,7 @@ var day: int = 0          # becomes 1 when the first day opens
 var is_open: bool = false
 var minutes_since_open: float = 0.0
 var _last_minute_shown: int = -1
+var _rush_name: String = ""
 
 # Recipe IDs you know, and the ones on today's menu (always some of
 # the known ones). .duplicate() makes a copy so the constant stays as-is.
@@ -188,6 +201,7 @@ var _applicants_day: int = -1
 
 # Stats for the end-of-day summary (reset every morning).
 var today_income: int = 0
+var today_ingredients: int = 0   # gold owed tonight for dishes cooked today
 var today_served: int = 0
 var today_walkouts: int = 0
 var today_turned_away: int = 0   # arrived but found no free table
@@ -222,8 +236,16 @@ func _process(delta: float) -> void:
 		_last_minute_shown = total_minutes
 		clock_changed.emit(floori(total_minutes / 60.0), total_minutes % 60)
 
+	var rush: String = current_rush().get("name", "")
+	if rush != _rush_name:
+		_rush_name = rush
+		rush_changed.emit(rush)
+
 	if total_minutes >= CLOSE_HOUR * 60:
 		is_open = false
+		if _rush_name != "":
+			_rush_name = ""
+			rush_changed.emit("")
 		shop_closed.emit(day)
 
 
@@ -237,6 +259,7 @@ func open_shop(banquet: bool = false) -> void:
 	minutes_since_open = 0.0
 	_last_minute_shown = -1
 	today_income = 0
+	today_ingredients = 0
 	today_served = 0
 	today_walkouts = 0
 	today_turned_away = 0
@@ -393,6 +416,11 @@ func refund(amount: int) -> void:
 
 # Wages always get paid, even if that takes gold below zero. While in
 # debt, try_spend() fails, so you can't build until you earn it back.
+# A Hearth started cooking this dish.
+func buy_ingredients(order: Dictionary) -> void:
+	today_ingredients += order.get("cost", 0)
+
+
 func pay_wages(amount: int) -> void:
 	gold -= amount
 	gold_changed.emit(gold)
@@ -644,11 +672,30 @@ func change_fame(amount: int) -> void:
 	fame_changed.emit(fame)
 
 
-# More fame = guests arrive more often (6 seconds at 0 fame, down to 1.5
-# at 90). Turning guests away spoils the daily review, so build more
-# Tables as fame grows.
+# The rush happening right now, or {} if none.
+func current_rush() -> Dictionary:
+	var hour: float = OPEN_HOUR + minutes_since_open / 60.0
+	for rush in RUSHES:
+		if hour >= rush["start"] and hour < rush["end"]:
+			return rush
+	return {}
+
+
+# How busy it is right now: 1 is normal, 2 means guests come twice as often.
+func busyness() -> float:
+	var rush: Dictionary = current_rush()
+	if not rush.is_empty():
+		return rush["busy"]
+	if OPEN_HOUR + minutes_since_open / 60.0 < QUIET_UNTIL:
+		return QUIET_BUSY
+	return 1.0
+
+
+# More fame = guests arrive more often (6 seconds at 0 fame, down to 2
+# at 100), and more often still during rushes. Turning guests away spoils
+# the daily review, so build more Tables and hire more staff as fame grows.
 func get_spawn_interval() -> float:
-	return max(1.5, 6.0 - fame * 0.05)
+	return max(2.0, 6.0 - fame * 0.04) / busyness()
 
 
 # ---------------------------------------------------------------------

@@ -71,7 +71,7 @@ var door_cell: Vector2i = Vector2i(4, START_ROWS - 1)
 const KITCHEN_DEPTH: int = 2
 const KITCHEN_START_WIDTH: int = 4
 const KITCHEN_MAX_WIDTH: int = 8
-const KITCHEN_WIDEN_COST: int = 150
+const KITCHEN_WIDEN_COST: int = 250
 const EXPO_CAPACITY: int = 3      # plates the pass can hold
 # Walking through the kitchen counts as this many squares, so guests and
 # waiters go around it unless there's truly no other way.
@@ -234,6 +234,7 @@ func _process(delta: float) -> void:
 			var next: Customer = _pop_next_order()
 			if next != null:
 				var cook_time: float = next.order["cook_time"]
+				GameManager.buy_ingredients(next.order)
 				h["job"] = {"customer": next, "time_left": cook_time, "total": cook_time}
 		else:
 			# The guest may have stormed out while we cooked. Bin the dish
@@ -610,7 +611,7 @@ func _try_move_kitchen(cell: Vector2i) -> void:
 		build_message.emit(problem)
 		return
 	var solid: Dictionary = _layout_with_kitchen(cell, kitchen_width)
-	if not _people_clear_of(solid) or not _layout_works(solid, door_cell, cell, kitchen_width):
+	if not _layout_works(solid, door_cell, cell, kitchen_width, false):
 		build_message.emit("That would block someone's way!")
 		return
 	_rebuild_kitchen(cell, kitchen_width)
@@ -635,7 +636,7 @@ func try_widen_kitchen() -> void:
 		build_message.emit(problem.replace("doesn't fit there", "has no room to grow"))
 		return
 	var solid: Dictionary = _layout_with_kitchen(kitchen_pos, kitchen_width + 1)
-	if not _people_clear_of(solid) or not _layout_works(solid, door_cell, kitchen_pos, kitchen_width + 1):
+	if not _layout_works(solid, door_cell, kitchen_pos, kitchen_width + 1, false):
 		build_message.emit("That would block someone's way!")
 		return
 	if not GameManager.try_spend(KITCHEN_WIDEN_COST):
@@ -646,13 +647,29 @@ func try_widen_kitchen() -> void:
 	build_message.emit("The kitchen is now %d squares wide." % kitchen_width)
 
 
-# Nobody may be standing where a new solid piece would go.
-func _people_clear_of(solid: Dictionary) -> bool:
-	var in_use: Dictionary = _cells_in_use(null)
-	for cell in solid:
-		if not furniture.has(cell) and in_use.has(cell):
-			return false
-	return true
+# Staff standing where the kitchen's new pieces go (between days, when
+# moving or widening it) step onto the nearest free square instead.
+func _move_staff_aside() -> void:
+	for walker in get_tree().get_nodes_in_group("walkers"):
+		var here: Vector2i = walker.current_cell()
+		if here == NO_CELL or not furniture.has(here):
+			continue
+		var spot: Vector2i = _nearest_open_cell(here)
+		if spot != NO_CELL:
+			walker.stop()
+			walker.end_standby()
+			walker.position = cell_center(spot)
+
+
+# The closest square nobody's furniture is on (rings outward from `from`).
+func _nearest_open_cell(from: Vector2i) -> Vector2i:
+	for radius in range(1, maxi(cols, rows)):
+		for dx in range(-radius, radius + 1):
+			for dy in range(-radius, radius + 1):
+				var spot: Vector2i = from + Vector2i(dx, dy)
+				if _in_bounds(spot) and not furniture.has(spot):
+					return spot
+	return NO_CELL
 
 
 # Takes the kitchen's pieces off the floor and puts them back at a new
@@ -676,6 +693,7 @@ func _rebuild_kitchen(pos: Vector2i, width: int) -> void:
 	for slot in slots:
 		_place(Vector2i(pos.x + slot, pos.y + 1), "kitchen")
 	_mark_kitchen()
+	_move_staff_aside()
 
 
 # Sets the kitchen from a save file. Saves from before the kitchen had
@@ -951,7 +969,8 @@ func _layout_works_with(new_cell: Vector2i) -> bool:
 # aisle square behind it free and reachable (that's where its cook
 # stands), and the pass needs both its back (cooks) and front (waiters).
 # `solid` maps squares to what's on them.
-func _layout_works(solid: Dictionary, door: Vector2i, k_pos: Vector2i, k_width: int) -> bool:
+# count_staff = false: staff will step aside (only guests are checked).
+func _layout_works(solid: Dictionary, door: Vector2i, k_pos: Vector2i, k_width: int, count_staff: bool = true) -> bool:
 	# FLOOD FILL outward from the door: visit every square we can walk
 	# to, one step at a time, until there's nowhere new to go.
 	var reachable: Dictionary = {door: true}
@@ -973,7 +992,7 @@ func _layout_works(solid: Dictionary, door: Vector2i, k_pos: Vector2i, k_width: 
 		if not usable:
 			return false
 
-	for person_cell in _cells_in_use(null):
+	for person_cell in _cells_in_use(null, count_staff):
 		if not reachable.has(person_cell):
 			return false
 
@@ -990,10 +1009,10 @@ func _layout_works(solid: Dictionary, door: Vector2i, k_pos: Vector2i, k_width: 
 
 
 # Every square someone is standing on or walking to, as dictionary keys.
-func _cells_in_use(ignore: Node) -> Dictionary:
+func _cells_in_use(ignore: Node, count_staff: bool = true) -> Dictionary:
 	var cells: Dictionary = {}
 	for walker in get_tree().get_nodes_in_group("walkers"):
-		if walker == ignore:
+		if walker == ignore or (not count_staff and not walker is Customer):
 			continue
 		for cell in [walker.current_cell(), walker.destination]:
 			if cell != NO_CELL:

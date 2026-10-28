@@ -182,10 +182,16 @@ func _on_fame_changed(amount: int) -> void:
 func _on_clock_changed(hour: int, minute: int) -> void:
 	# %02d = pad with zeros to 2 digits, so 9:5 shows as 09:05
 	_clock_label.text = "Day %d   %02d:%02d" % [GameManager.day, hour, minute]
+	# During a rush the clock turns orange and says so (short, to fit).
+	var rush: bool = not GameManager.current_rush().is_empty()
+	if rush:
+		_clock_label.text = "%02d:%02d  Rush!" % [hour, minute]
+	_clock_label.modulate = Color(1.0, 0.6, 0.25) if rush else Color.WHITE
 
 
 func _on_shop_opened(day: int) -> void:
 	_clock_label.text = "Day %d   %02d:00" % [day, GameManager.OPEN_HOUR]
+	_clock_label.modulate = Color.WHITE
 
 
 # Build and Staff open their tray; tapping the same one again closes it.
@@ -543,7 +549,7 @@ func _refresh_recipes() -> void:
 		info.add_child(name_label)
 		var who: String = "Nobles only" if recipe["tier"] == 3 else "Common folk"
 		var details := _make_label(20)
-		details.text = "%dg   %.1fs to cook   %s" % [recipe["price"], recipe["cook_time"], who]
+		details.text = "%dg (ingredients %dg)   %.1fs to cook   %s" % [recipe["price"], recipe["cost"], recipe["cook_time"], who]
 		details.modulate = Color(0.8, 0.8, 0.8)
 		info.add_child(details)
 
@@ -770,6 +776,8 @@ func _refresh_people() -> void:
 		about.add_child(name_label)
 		var job := _make_label(20)
 		job.text = "%s  %dg/day" % [info["title"], info["wage"]]
+		if _people_mode != "staff":
+			job.text += "  (hire: %dg)" % StaffProfiles.hiring_fee(profile)
 		job.modulate = Color(0.8, 0.8, 0.8)
 		about.add_child(job)
 		var trait_label := _make_label(20)

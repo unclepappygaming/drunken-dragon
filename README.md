@@ -48,8 +48,14 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 - Fame earns **ranks**: Unknown, Local Haunt (10), Town Favorite (25), Talk
   of the Realm (55), Famed Hall (90), Legendary (140). More fame also brings
   guests faster, so keep building to keep the reviews good.
+- **Rush hours**: guests come 1.7x as often at lunch (12:00-14:00) and 2x
+  at dinner (18:00-20:00); mornings before 11:00 are quiet. The clock turns
+  orange during a rush. Plan your staff for the rush, not the quiet hours.
+- **Ingredients**: every dish costs something to make (about a third of its
+  price), paid at night with the wages, even if the guest left before
+  eating it.
 - More fame brings guests faster. At 25 fame you can host **Noble Banquets**
-  (tap Open Day, then Host a Banquet, 150g, once every 3 days). A party of
+  (tap Open Day, then Host a Banquet, 250g, once every 3 days). A party of
   nobles (gold crowns) arrives between 12:00 and 15:00. They skip the line,
   only order "Nobles only" dishes and tip 50%. If they all leave happy it's
   a triumph (+3 fame); at least half is +1; fewer than half is -2.
@@ -67,20 +73,22 @@ The bottom bar has four buttons:
     days: tap where its back-left corner should go.
   - **Expand** makes the floor bigger, up to 12 x 14. Each expansion is
     unlocked by a quest (like "Serve 60 guests"), then bought with gold.
-    The same card has **Widen Kitchen** (150g a square, up to 8 wide).
+    The same card has **Widen Kitchen** (250g a square, up to 8 wide). Tables cost 100g and
+    Hearths 250g; selling gives half back.
 - **Staff** opens a tray: **Hire Cook**, **Hire Waiter** (three new
   applicants each day) and **Your Staff** (let someone go). Between days
-  only. Wages are paid every night. Every staff member has a name, their
-  own look, and a trait that comes with their type:
+  only. Hiring costs a signing fee of 4 days' wages up front, then wages
+  are paid every night. Every staff member has a name, their own look, and
+  a trait that comes with their type:
 
   | Type | Trait | Wage |
   | --- | --- | --- |
-  | Classic Chef | Trained: cooks every dish 25% faster | 30g |
-  | Tavern Cook | Hearty Portions: their dishes earn 15% more gold | 25g |
-  | Dwarf Cook | Roast Master: roasts cook 40% faster | 27g |
-  | Barkeep | Smooth Talker: +10s patience for guests they serve | 22g |
-  | Serving Maid | Nimble: walks 25% faster | 22g |
-  | Halfling Server | Lucky: 1 in 3 guests tips +50%, but walks 10% slower | 18g |
+  | Classic Chef | Trained: cooks every dish 25% faster | 42g |
+  | Tavern Cook | Hearty Portions: their dishes earn 15% more gold | 36g |
+  | Dwarf Cook | Roast Master: roasts cook 40% faster | 38g |
+  | Barkeep | Smooth Talker: +10s patience for guests they serve | 30g |
+  | Serving Maid | Nimble: walks 25% faster | 30g |
+  | Halfling Server | Lucky: 1 in 3 guests tips +50%, but walks 10% slower | 25g |
 - **Recipes & Goals** opens the book: pick up to 4 dishes for the menu,
   check your quests, and see your rank and milestones.
 - **Open Day** starts the next day (once banquets are unlocked, it asks
@@ -131,11 +139,16 @@ The floor and walls are drawn in code; characters and furniture are pixel-art sp
    - ✅ Waiting line outside the door when the tavern is full
    - ✅ Compact bottom bar with Build and Staff trays
    - ✅ Nobles come only to Noble Banquets you host (unlocked at 25 fame)
-4. ⬜ **Balance pass**
-   - Busy-hour rushes so a well-staffed tavern still feels stretched
+4. ✅ **Balance pass**
+   - ✅ Lunch and dinner rushes so a well-staffed tavern still feels stretched
    - ✅ Fame from nightly reviews, milestones and banquets instead of every
      guest, with ranks from Unknown to Legendary
-   - Tune prices, cook times, patience and wages against real play
+   - ✅ Ingredient costs, cheaper dishes, a hiring fee, pricier furniture,
+     expansions and wages, tested with a bot over 50-day games: a good
+     player reaches Local Haunt around day 7, Town Favorite day 11, Talk of
+     the Realm day 18, Famed Hall day 26 and Legendary around day 43
+   - ⬜ More to spend gold on late in the game (it piles up once everything
+     is built)
 5. ✅ **Bigger tavern**
    - ✅ Four floor expansions up to 12 x 14, each earned by a quest, then bought
    - ✅ Move the front door to any wall, with the same "nothing gets blocked" check
