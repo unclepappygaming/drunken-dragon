@@ -63,6 +63,9 @@ var _timer: float = 0.0
 var _bubble: String = ""             # text shown above their head
 var _patience_scale: float = 1.0     # from the guest type
 var _patience_at_serve: float = 0.0  # for the Town Guard's quick-service tip
+# Speech bubble and patience bar live on their own layer above every
+# character, so one guest's bubble never darkens the guest behind it.
+var _overlay: Node2D
 
 
 # Called by main.gd right after the guest is created. We can't pass
@@ -80,6 +83,15 @@ func setup(tavern_grid: TavernGrid, type: String = "farmer") -> void:
 	sprite_sheet = GuestTypes.SHEETS[look["sheet"]]
 	material = GuestTypes.material_for(type, look)
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	# Guests always show at least their profile, never the back of their head.
+	show_back = false
+
+	# z_index puts the overlay above all the characters (z_index 0). It
+	# has no material of its own, so the color swap doesn't touch it.
+	_overlay = Node2D.new()
+	_overlay.z_index = 5
+	add_child(_overlay)
+	_overlay.draw.connect(_draw_overlay)
 
 	# GROUPS are tags. Putting every guest in "customers" lets main.gd ask
 	# "how many guests are still here?" with one line, without keeping
@@ -140,6 +152,7 @@ func _process(delta: float) -> void:
 
 		State.WALKING_IN:
 			if _walk(delta):
+				face_toward(grid.cell_center(table_cell))
 				state = State.DECIDING
 				_timer = DECIDE_TIME
 				_bubble = "..."
@@ -183,8 +196,9 @@ func _process(delta: float) -> void:
 				# queue_free() deletes this node safely at the end of the frame.
 				queue_free()
 
-	# Ask Godot to call _draw() again so the patience bar animates.
+	# Ask Godot to redraw us and the overlay, so the patience bar animates.
 	queue_redraw()
+	_overlay.queue_redraw()
 
 
 # Called by a Waiter once they've written the order down. The order
@@ -236,18 +250,24 @@ func _start_leaving(reason: String) -> void:
 
 
 # _draw() paints this node. (0, 0) is the guest's own position, so
-# everything is drawn relative to them: the sprite, then the patience
-# bar under their feet and the speech bubble above their head.
+# everything is drawn relative to them.
 func _draw() -> void:
 	draw_sprite()
 
+
+# The patience bar under their feet and the speech bubble above their
+# head, drawn on the overlay (see setup).
+func _draw_overlay() -> void:
 	if state in [State.IN_LINE, State.WAITING_FOR_WAITER, State.WAITING_FOR_FOOD]:
 		var ratio: float = patience / _patience_max
-		draw_rect(Rect2(-25, 22, 50, 7), Color(0.15, 0.15, 0.15))
+		_overlay.draw_rect(Rect2(-25, 22, 50, 7), Color(0.15, 0.15, 0.15))
 		# Green when patient, fading to red.
-		draw_rect(Rect2(-25, 22, 50 * ratio, 7), Color(1.0 - ratio, ratio, 0.2))
+		_overlay.draw_rect(Rect2(-25, 22, 50 * ratio, 7), Color(1.0 - ratio, ratio, 0.2))
 
 	if _bubble != "":
-		draw_rect(Rect2(-90, -96, 180, 28), Color(0, 0, 0, 0.65))
-		draw_string(ThemeDB.fallback_font, Vector2(-90, -75), _bubble,
-				HORIZONTAL_ALIGNMENT_CENTER, 180, 19, Color.WHITE)
+		# Just wide enough for the words, so it covers as little as possible.
+		var font: Font = ThemeDB.fallback_font
+		var width: float = font.get_string_size(_bubble, HORIZONTAL_ALIGNMENT_LEFT, -1, 19).x + 14.0
+		_overlay.draw_rect(Rect2(-width / 2.0, -96, width, 28), Color(0, 0, 0, 0.65))
+		_overlay.draw_string(font, Vector2(-width / 2.0, -75), _bubble,
+				HORIZONTAL_ALIGNMENT_CENTER, width, 19, Color.WHITE)

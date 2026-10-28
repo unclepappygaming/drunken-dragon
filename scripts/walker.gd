@@ -36,7 +36,11 @@ var _stuck: bool = false
 const WALK_FPS: float = 6.0       # walk-cycle frames per second
 const SPRITE_SCALE: float = 2.0   # sheet pixels -> world pixels
 var sprite_sheet: Texture2D       # null = no sprite
+# false = never show this walker's back: walking away from the camera
+# shows their side profile instead (guests use this).
+var show_back: bool = true
 var _facing: String = "front"     # "front", "back", "left" or "right"
+var _last_side: String = "right"  # the profile to use when walking straight up
 var _anim_time: float = 0.0
 var _last_moved_frame: int = -10
 
@@ -116,8 +120,29 @@ func _note_movement(moved: Vector2, delta: float) -> void:
 	_anim_time += delta
 	if absf(moved.x) > absf(moved.y):
 		_facing = "right" if moved.x > 0 else "left"
+	elif moved.y > 0:
+		_facing = "front"
+	elif show_back:
+		_facing = "back"
 	else:
-		_facing = "front" if moved.y > 0 else "back"
+		# Walking away from us: show a profile, leaning the way they drift.
+		if absf(moved.x) > 0.01:
+			_last_side = "right" if moved.x > 0 else "left"
+		_facing = _last_side
+	if _facing == "left" or _facing == "right":
+		_last_side = _facing
+
+
+# Turns to look at a point (e.g. their table). With show_back off, a
+# point straight above makes them face the camera instead.
+func face_toward(point: Vector2) -> void:
+	var offset: Vector2 = point - position
+	if absf(offset.x) > absf(offset.y):
+		_facing = "right" if offset.x > 0 else "left"
+	elif offset.y > 0 or not show_back:
+		_facing = "front"
+	else:
+		_facing = "back"
 
 
 func is_moving() -> bool:
