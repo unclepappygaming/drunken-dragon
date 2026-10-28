@@ -2,8 +2,9 @@
 
 Run from the repo root:  python3 tools/sprites/make_furniture.py
 It writes the game's furniture sprites to assets/sprites/furniture/ and a
-preview sheet of options still being picked (furniture_options.png) next
-to this script.
+preview sheet (furniture_options.png) next to this script. The pieces that
+weren't picked (round table, barrel, stone fire, spit roast, plain and
+marble pass) are kept below in case they're wanted later.
 
 Furniture is built from simple 3D shapes (boxes and cylinders) and drawn
 in the same 2:1 isometric view as the floor. One square of floor is 48 x 24
@@ -151,20 +152,19 @@ def table_round():
 
 
 def table_trestle():
-    """Square plank table on X-shaped trestle legs, with two mugs."""
+    """Square plank table on X-shaped trestle legs. It stays bare: the
+    game draws plates on it when food arrives. Waist high to a guest."""
     p = Piece()
-    p.shadow(11)
-    for x in (-7, 7):   # X legs at each end
-        p.line(P(x, -7, 0), P(x, 7, 14), OAK_DARK)
-        p.line(P(x, 7, 0), P(x, -7, 14), OAK_DARK)
-        p.line(P(x + 1, -7, 0), P(x + 1, 7, 14), shade(OAK_DARK, 0.8))
-        p.line(P(x + 1, 7, 0), P(x + 1, -7, 14), shade(OAK_DARK, 0.8))
-    p.box(-6, -1, 5, 6, 1, 7, OAK_DARK, edge=False)          # stretcher
-    p.box(-10, -9, 14, 10, 9, 18, PINE)
+    p.shadow(9)
+    for x in (-6, 6):   # X legs at each end
+        p.line(P(x, -5, 0), P(x, 5, 10), OAK_DARK)
+        p.line(P(x, 5, 0), P(x, -5, 10), OAK_DARK)
+        p.line(P(x + 1, -5, 0), P(x + 1, 5, 10), shade(OAK_DARK, 0.8))
+        p.line(P(x + 1, 5, 0), P(x + 1, -5, 10), shade(OAK_DARK, 0.8))
+    p.box(-5, -1, 4, 5, 1, 5, OAK_DARK, edge=False)          # stretcher
+    p.box(-9, -8, 10, 9, 8, 13, PINE)
     for y in (-3, 3):  # plank gaps
-        p.line(P(-10, y, 18), P(10, y, 18), shade(PINE, 0.8))
-    mug(p, -4, -4, 18)
-    mug(p, 4, 3, 18)
+        p.line(P(-9, y, 13), P(9, y, 13), shade(PINE, 0.8))
     return p.finish()
 
 
@@ -235,24 +235,25 @@ def hearth_stove(frame=0, lit=True):
     Unlit (nobody cooking) it just glows; lit, the fire and steam move."""
     p = Piece()
     p.shadow(11)
-    p.box(-10, -10, 0, 10, 10, 15, BRICK, shade(BRICK, 0.9), shade(BRICK, 0.72))
-    for z in (3, 7, 11):    # mortar lines
-        p.line(P(-10, 10, z), P(10, 10, z), shade(MORTAR, 0.9))
-        p.line(P(10, 10, z), P(10, -10, z), shade(MORTAR, 0.75))
-    for i, z in enumerate((0, 3, 7, 11)):
-        for x in range(-8 + (i % 2) * 3, 10, 6):
-            p.line(P(x, 10, z), P(x, 10, z + 3), shade(MORTAR, 0.9))
-            p.line(P(10, x, z), P(10, x, z + 3), shade(MORTAR, 0.75))
-    p.box(-10, -10, 15, 10, 10, 17, IRON, shade(IRON, 1.2), shade(IRON, 0.9))
+    # Kept low (about waist high) so the cook behind it stays in view.
+    p.box(-9, -9, 0, 9, 9, 10, BRICK, shade(BRICK, 0.9), shade(BRICK, 0.72))
+    for z in (3, 7):    # mortar lines
+        p.line(P(-9, 9, z), P(9, 9, z), shade(MORTAR, 0.9))
+        p.line(P(9, 9, z), P(9, -9, z), shade(MORTAR, 0.75))
+    for i, z in enumerate((0, 3, 7)):
+        for x in range(-7 + (i % 2) * 3, 9, 6):
+            p.line(P(x, 9, z), P(x, 9, min(z + 3, 10)), shade(MORTAR, 0.9))
+            p.line(P(9, x, z), P(9, x, min(z + 3, 10)), shade(MORTAR, 0.75))
+    p.box(-9, -9, 10, 9, 9, 12, IRON, shade(IRON, 1.2), shade(IRON, 0.9))
     # fire door in the front-left face
-    p.poly([P(-5, 10, 3), P(3, 10, 3), P(3, 10, 10), P(-5, 10, 10)], (35, 25, 25, 255))
-    fire(p, -1, 10, 3.5, 3 if lit else 1, frame)
-    p.cylinder(-4, -4, 17, 23, 5, (70, 70, 78, 255), (120, 85, 50, 255))   # stew pot
-    p.cylinder(5, 4, 17, 18, 4, (40, 40, 44, 255), (25, 25, 28, 255))      # frying pan
-    p.line(P(9, 4, 18), P(12, 4, 18), (40, 40, 44, 255))
-    sx, sy = P(5, 4, 18)
+    p.poly([P(-5, 9, 2), P(3, 9, 2), P(3, 9, 8), P(-5, 9, 8)], (35, 25, 25, 255))
+    fire(p, -1, 9, 2.5, 3 if lit else 1, frame)
+    p.cylinder(-4, -4, 12, 17, 4.5, (70, 70, 78, 255), (120, 85, 50, 255))   # stew pot
+    p.cylinder(4, 4, 12, 13, 3.5, (40, 40, 44, 255), (25, 25, 28, 255))      # frying pan
+    p.line(P(7.5, 4, 13), P(10.5, 4, 13), (40, 40, 44, 255))
+    sx, sy = P(4, 4, 13)
     p.px(sx - 1, sy, (250, 240, 200, 255)); p.px(sx + 1, sy, (240, 180, 60, 255))   # an egg
-    sx, sy = P(-4, -4, 23)
+    sx, sy = P(-4, -4, 17)
     for k in range(3 if lit else 0):  # steam
         p.px(sx + (1 if (k + frame) % 2 else -1), sy - 3 - k * 2, (235, 235, 235, 200))
     return p.finish()
@@ -390,7 +391,7 @@ if __name__ == "__main__":
         person(img, os.path.join(staff, "maid.png"), (0, 1))       # waiter in front
         return img
 
-    # The pieces the game uses (chosen: plank trestle table, brick stove).
+    # The pieces the game uses: plank trestle table, brick stove, serving hatch.
     out = os.path.join(root, "assets", "sprites", "furniture")
     os.makedirs(out, exist_ok=True)
     table_trestle().save(os.path.join(out, "table.png"))
@@ -400,11 +401,12 @@ if __name__ == "__main__":
     for f in range(3):
         hearth.paste(hearth_stove(f, lit=True), (FW * (f + 1), 0))
     hearth.save(os.path.join(out, "hearth.png"))
+    pass_window().save(os.path.join(out, "pass.png"))
 
     rows = [
-        ("Pass (no sign)", [("A  Plain stone-topped counter", pass_scene(pass_plain())),
-                            ("B  Marble + brass bell", pass_scene(pass_bell())),
-                            ("C  Serving hatch", pass_scene(pass_window()))]),
+        ("Chosen furniture", [("Plank trestle table", table_scene(table_trestle())),
+                              ("Brick stove", hearth_scene(hearth_stove())),
+                              ("Serving hatch (the pass)", pass_scene(pass_window()))]),
     ]
     S = 2                   # the game's own size
     cw, ch = PW * S + 20, PH * S + 48

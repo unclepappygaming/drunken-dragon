@@ -28,6 +28,8 @@ signal build_message(text: String)
 # Fired after furniture is built or sold, so anyone mid-walk can plan
 # a new route around it.
 signal layout_changed
+# Fired when a waiter clears a table, so the next guest in line can sit.
+signal table_freed
 
 const START_COLS: int = 8
 const START_ROWS: int = 10
@@ -84,6 +86,11 @@ var expo_plates: Array = []
 var furniture: Dictionary = {}
 # table cell -> the Customer sitting there, or null if free
 var table_owner: Dictionary = {}
+# table cell -> {"full": plates being eaten, "dirty": empty plates left
+# behind}. A table with dirty plates can't seat anyone until a Waiter
+# clears it and takes the plates back to the kitchen.
+var table_dishes: Dictionary = {}
+var _bussers: Dictionary = {}        # table cell -> the Waiter coming to clear it
 # hearth cell -> {
 #   "cook":        the Cook working it, or null
 #   "job":         {} when not cooking, or {"customer", "time_left", "total"}
@@ -364,7 +371,7 @@ func standby_cell(asker: Node) -> Vector2i:
 func find_free_table() -> Vector2i:
 	var free: Array[Vector2i] = []
 	for cell in table_owner:
-		if table_owner[cell] == null:
+		if table_owner[cell] == null and _is_clean(cell):
 			free.append(cell)
 	if free.is_empty():
 		return NO_CELL
@@ -378,6 +385,81 @@ func reserve_table(cell: Vector2i, customer: Customer) -> void:
 func release_table(cell: Vector2i) -> void:
 	if table_owner.has(cell):
 		table_owner[cell] = null
+
+
+# ---------------------------------------------------------------------
+# Plates on tables
+# ---------------------------------------------------------------------
+func _is_clean(cell: Vector2i) -> bool:
+	var dishes: Dictionary = table_dishes.get(cell, {})
+	return dishes.get("full", 0) == 0 and dishes.get("dirty", 0) == 0
+
+
+func _change_dishes(cell: Vector2i, full: int, dirty: int) -> void:
+	if not furniture.has(cell):
+		return
+	var dishes: Dictionary = table_dishes.get(cell, {"full": 0, "dirty": 0})
+	dishes["full"] = maxi(dishes["full"] + full, 0)
+	dishes["dirty"] = maxi(dishes["dirty"] + dirty, 0)
+	table_dishes[cell] = dishes
+	_props[cell].queue_redraw()
+
+
+# A Waiter sets a guest's food down.
+func serve_dish(cell: Vector2i) -> void:
+	_change_dishes(cell, 1, 0)
+
+
+# The guest finished eating: the full plate becomes a dirty one.
+func finish_dish(cell: Vector2i) -> void:
+	_change_dishes(cell, -1, 1)
+
+
+# A Waiter looks for a table everyone has left that still has dirty
+# plates and nobody else is coming to clear. Returns NO_CELL if none.
+func claim_dirty_table(waiter: Waiter) -> Vector2i:
+	for cell in table_dishes:
+		if table_dishes[cell]["dirty"] > 0 and table_owner.get(cell) == null \
+				and not is_instance_valid(_bussers.get(cell)):
+			_bussers[cell] = waiter
+			return cell
+	return NO_CELL
+
+
+# The Waiter is at the table: they pick up every dirty plate. Returns how
+# many they took (0 if the table was sold or washed meanwhile).
+func clear_table(cell: Vector2i, waiter: Waiter) -> int:
+	if _bussers.get(cell) == waiter:
+		_bussers.erase(cell)
+	if not table_dishes.has(cell):
+		return 0
+	var taken: int = table_dishes[cell]["dirty"]
+	table_dishes[cell]["dirty"] = 0
+	_props[cell].queue_redraw()
+	if _is_clean(cell):
+		table_freed.emit()
+	return taken
+
+
+func release_busser(waiter: Waiter) -> void:
+	for cell in _bussers.keys():
+		if _bussers[cell] == waiter:
+			_bussers.erase(cell)
+
+
+func has_dirty_tables() -> bool:
+	for cell in table_dishes:
+		if table_dishes[cell]["dirty"] > 0:
+			return true
+	return false
+
+
+# Overnight, any plates still out get washed.
+func wash_all_tables() -> void:
+	table_dishes.clear()
+	_bussers.clear()
+	for cell in table_owner:
+		_props[cell].queue_redraw()
 
 
 # A Cook asks for a Hearth that nobody is working. Returns its cell.
@@ -810,6 +892,8 @@ func _try_remove(cell: Vector2i) -> void:
 	GameManager.refund(refund)
 	furniture.erase(cell)
 	table_owner.erase(cell)
+	table_dishes.erase(cell)
+	_bussers.erase(cell)
 	hearths.erase(cell)
 	_remove_prop(cell)
 	_astar.set_point_solid(cell, false)
@@ -945,7 +1029,7 @@ func _pop_next_order() -> Customer:
 
 
 # ---------------------------------------------------------------------
-# Drawing (simple shapes for now; the art pass replaces them)
+# Drawing
 # ---------------------------------------------------------------------
 const FLOOR_A := Color8(237, 201, 138)
 const FLOOR_B := Color8(226, 185, 118)
@@ -1053,29 +1137,12 @@ func draw_prop(prop: FloorProp) -> void:
 		"wall": _draw_front_wall(prop)
 
 
-# A box sitting on the middle of a square: `inset` is its size compared
-# to the square, `height` how tall it is, starting `from_height` above
-# the floor. Returns the middle of its top face.
-func _draw_block(prop: FloorProp, inset: float, height: float, top: Color, left: Color, right: Color, from_height: float = 0.0) -> Vector2:
-	var hw: float = TILE_W / 2.0 * inset
-	var hh: float = TILE_H / 2.0 * inset
-	var lift := Vector2(0, -height)
-	var base := Vector2(0, -from_height)
-	var n := Vector2(0, -hh)
-	var e := Vector2(hw, 0)
-	var s := Vector2(0, hh)
-	var w := Vector2(-hw, 0)
-	prop.draw_colored_polygon(PackedVector2Array([w + base, s + base, s + lift, w + lift]), left)
-	prop.draw_colored_polygon(PackedVector2Array([s + base, e + base, e + lift, s + lift]), right)
-	prop.draw_colored_polygon(PackedVector2Array([n + lift, e + lift, s + lift, w + lift]), top)
-	return lift
-
-
 # Pixel-art furniture (drawn by tools/sprites/make_furniture.py). Each
 # frame is 64 x 72 with the middle of its square at (32, 58), drawn at 2x
 # like the characters.
 const TABLE_ART: Texture2D = preload("res://assets/sprites/furniture/table.png")
 const HEARTH_ART: Texture2D = preload("res://assets/sprites/furniture/hearth.png")
+const PASS_ART: Texture2D = preload("res://assets/sprites/furniture/pass.png")
 const ART_FRAME := Vector2(64, 72)
 const ART_ANCHOR := Vector2(32, 58)
 const ART_SCALE: float = 2.0
@@ -1086,8 +1153,38 @@ func _draw_art(prop: FloorProp, art: Texture2D, frame: int = 0) -> void:
 	prop.draw_texture_rect_region(art, Rect2(-ART_ANCHOR * ART_SCALE, ART_FRAME * ART_SCALE), source)
 
 
+const TABLE_TOP: float = 26.0   # how high the tabletop is, in world pixels
+# Where plates go on the tabletop (up to 3: adventurers share a table).
+const PLATE_SPOTS: Array = [Vector2(-10, -2), Vector2(10, -2), Vector2(0, 5)]
+
+
 func _draw_table(prop: FloorProp) -> void:
 	_draw_art(prop, TABLE_ART)
+	# The table stays bare until food arrives. Dirty plates stay until a
+	# Waiter clears them.
+	var dishes: Dictionary = table_dishes.get(prop.cell, {})
+	var full: int = dishes.get("full", 0)
+	var dirty: int = dishes.get("dirty", 0)
+	for i in mini(full + dirty, PLATE_SPOTS.size()):
+		_draw_plate(prop, Vector2(0, -TABLE_TOP) + PLATE_SPOTS[i], i < full)
+
+
+# A plate seen from above at the isometric angle (squashed to half height).
+func _draw_plate(prop: CanvasItem, at: Vector2, with_food: bool) -> void:
+	prop.draw_set_transform(at, 0.0, Vector2(1.0, 0.5))
+	prop.draw_circle(Vector2.ZERO, 12.0, Color8(40, 26, 20))     # outline
+	prop.draw_circle(Vector2.ZERO, 11.0, Color8(245, 242, 232))
+	if with_food:
+		prop.draw_circle(Vector2(0, -1), 7.5, Color8(150, 80, 35))
+		prop.draw_circle(Vector2(-1, -2), 6.0, Color8(195, 112, 50))
+		prop.draw_circle(Vector2(-3, -4), 2.5, Color8(240, 175, 95))
+		prop.draw_circle(Vector2(4, 2), 2.0, Color8(110, 160, 60))   # a bit of green
+	else:
+		# Leftover crumbs and a smear of sauce.
+		prop.draw_circle(Vector2(3, 2), 2.5, Color8(175, 105, 55))
+		prop.draw_circle(Vector2(-4, -3), 1.5, Color8(150, 95, 50))
+		prop.draw_circle(Vector2(-2, 4), 1.5, Color8(190, 120, 60))
+	prop.draw_set_transform(Vector2.ZERO)
 
 
 func _draw_hearth(prop: FloorProp) -> void:
@@ -1097,7 +1194,7 @@ func _draw_hearth(prop: FloorProp) -> void:
 	# Frame 0 is the idle glow; while cooking, the fire cycles frames 1-3.
 	var frame: int = 1 + (Time.get_ticks_msec() / 140) % 3 if cooking else 0
 	_draw_art(prop, HEARTH_ART, frame)
-	var top := Vector2(0, -50)   # just above the stew pot
+	var top := Vector2(0, -38)   # just above the stew pot
 	if cooking:
 		var job: Dictionary = h["job"]
 		var done: float = 1.0 - job["time_left"] / job["total"]
@@ -1109,13 +1206,11 @@ func _draw_hearth(prop: FloorProp) -> void:
 				HORIZONTAL_ALIGNMENT_CENTER, 80, 15, Color(1.0, 0.75, 0.75))
 
 
-# The pass: a low counter with the waiting plates on it.
+# The pass: a serving hatch with the waiting plates on its counter.
 func _draw_expo(prop: FloorProp) -> void:
-	var top: Vector2 = _draw_block(prop, 0.85, 26.0, Color8(214, 200, 176), Color8(150, 110, 70), Color8(128, 92, 58))
+	_draw_art(prop, PASS_ART)
 	for i in expo_plates.size():
-		var spot: Vector2 = top + Vector2(-14 + i * 14, -2 + (i % 2) * 4)
-		prop.draw_circle(spot, 7.0, Color.WHITE)
-		prop.draw_circle(spot, 4.0, Color8(190, 110, 50))
+		_draw_plate(prop, Vector2(-14 + i * 14, -28 + (i % 2) * 5), true)
 
 
 func _draw_front_wall(prop: FloorProp) -> void:

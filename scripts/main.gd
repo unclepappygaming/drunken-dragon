@@ -68,8 +68,9 @@ func _ready() -> void:
 	# Building or selling between days changes the save, so save again.
 	grid.layout_changed.connect(_save_if_closed)
 	GameManager.recipes_changed.connect(_save_if_closed)
-	# A newly built table can seat whoever is first in line.
+	# A newly built or newly cleared table can seat whoever is first in line.
 	grid.layout_changed.connect(_seat_from_line)
+	grid.table_freed.connect(_seat_from_line)
 
 	var save: Dictionary = GameManager.load_game()
 	if save.is_empty():
@@ -114,10 +115,13 @@ func _process(_delta: float) -> void:
 		_noble_arrivals.pop_front()
 		_noble_arrives()
 
-	# After closing, wait until every guest has walked out the door.
+	# After closing, wait until every guest has walked out the door and
+	# the waiters have cleared the tables (if there are any waiters).
 	# get_nodes_in_group asks for every node tagged "customers".
-	if _waiting_for_last_guests and get_tree().get_nodes_in_group("customers").is_empty():
+	if _waiting_for_last_guests and get_tree().get_nodes_in_group("customers").is_empty() \
+			and (not grid.has_dirty_tables() or get_tree().get_nodes_in_group("waiters").is_empty()):
 		_waiting_for_last_guests = false
+		grid.wash_all_tables()
 		_show_day_summary()
 
 

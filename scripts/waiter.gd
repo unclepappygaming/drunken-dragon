@@ -1,11 +1,15 @@
 # =====================================================================
 # waiter.gd  —  one waiter. Attached to scenes/waiter.tscn.
 #
-# Waiters do two jobs, always picking finished food first (a full pass
-# makes cooks wait):
+# Waiters do three jobs, in this order (a full pass makes cooks wait,
+# and a dirty table can't seat the next guest):
 #
-#   take an order:  IDLE -> TO_GUEST -> TAKING_ORDER -> IDLE
 #   serve food:     IDLE -> TO_PASS -> CARRYING -> IDLE
+#   take an order:  IDLE -> TO_GUEST -> TAKING_ORDER -> IDLE
+#   clear a table:  IDLE -> TO_TABLE -> CLEARING -> RETURNING -> IDLE
+#
+# Clearing means picking up the empty plates a table's guests left, and
+# taking them back to the pass for washing.
 #
 # Waiters never go into the kitchen: they collect plates from the square
 # in front of the pass (the expo counter).
@@ -22,10 +26,11 @@
 class_name Waiter
 extends Walker
 
-enum State { IDLE, TO_GUEST, TAKING_ORDER, TO_PASS, CARRYING, LEAVING }
+enum State { IDLE, TO_GUEST, TAKING_ORDER, TO_PASS, CARRYING, TO_TABLE, CLEARING, RETURNING, LEAVING }
 
 const WALK_SPEED: float = 220.0
 const ORDER_TAKE_TIME: float = 1.0
+const CLEAR_TIME: float = 0.8
 const SMOOTH_TALK_PATIENCE: float = 10.0
 const LUCKY_CHANCE: float = 1.0 / 3.0
 const LUCKY_TIP: float = 0.5
@@ -33,6 +38,7 @@ const LUCKY_TIP: float = 0.5
 var state: State = State.IDLE
 
 var _guest: Customer = null                 # who we're working for
+var _table: Vector2i = TavernGrid.NO_CELL   # the table we're clearing
 var _timer: float = 0.0
 var profile: Dictionary = {}
 
@@ -98,6 +104,25 @@ func _process(delta: float) -> void:
 				_guest = null
 				state = State.IDLE
 
+		State.TO_TABLE:
+			if _walk(delta):
+				state = State.CLEARING
+				_timer = CLEAR_TIME
+
+		State.CLEARING:
+			_timer -= delta
+			if _timer <= 0.0:
+				if grid.clear_table(_table, self) > 0:
+					go_to_cell(grid.expo_front())   # plates go back to the kitchen
+					state = State.RETURNING
+				else:
+					state = State.IDLE   # the table was sold or washed meanwhile
+				_table = TavernGrid.NO_CELL
+
+		State.RETURNING:
+			if _walk(delta):
+				state = State.IDLE   # handed in at the pass for washing
+
 		State.LEAVING:
 			if _walk(delta):
 				queue_free()
@@ -108,6 +133,7 @@ func _process(delta: float) -> void:
 # Called by main.gd when the player lets this waiter go.
 func leave() -> void:
 	remove_from_group("waiters")
+	grid.release_busser(self)
 	state = State.LEAVING
 	go_out_door()
 
@@ -126,6 +152,15 @@ func _find_task() -> void:
 		_guest = guest
 		go_to_cell(grid.access_cell(guest.table_cell, position, self))
 		state = State.TO_GUEST
+		return
+
+	# Nothing else to do: clear a table guests have left.
+	var table: Vector2i = grid.claim_dirty_table(self)
+	if table != TavernGrid.NO_CELL:
+		end_standby()
+		_table = table
+		go_to_cell(grid.access_cell(table, position, self))
+		state = State.TO_TABLE
 
 
 func _give_up() -> void:
@@ -141,4 +176,4 @@ func _guest_is(guest_state: Customer.State) -> bool:
 
 
 func _draw() -> void:
-	draw_sprite(state == State.CARRYING)
+	draw_sprite(state == State.CARRYING or state == State.RETURNING)

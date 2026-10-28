@@ -32,6 +32,11 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
   plates; if it's full, cooks wait.
 - **Waiters** take orders, collect dishes from the front of the pass (they
   never enter the kitchen) and carry them to the table.
+- **Tables stay bare until food arrives.** When guests finish, their empty
+  plates stay behind, and nobody new can sit there until a waiter clears
+  them and takes them back to the pass for washing. Waiters serve food
+  first, then take orders, then clear tables, so a busy room needs enough
+  waiters. Plates still out at closing get washed overnight.
 - Every guest has a **patience bar**. If it runs out, they storm off.
 - **Fame** grows slowly, and comes from three places:
   - **Nightly reviews**: the share of today's guests who left happy (anyone
@@ -98,7 +103,7 @@ asked to download export templates the first time).
 
 ## Code tour
 
-All art is placeholder shapes drawn in code, so the scripts are the whole game:
+The floor and walls are drawn in code; characters and furniture are pixel-art sprites made by the scripts in `tools/sprites/`:
 
 | Script | What it does |
 | --- | --- |
@@ -114,6 +119,7 @@ All art is placeholder shapes drawn in code, so the scripts are the whole game:
 | `scripts/guest_types.gd` | Guest types, how often they come, and their looks |
 | `shaders/palette_swap.gdshader` | Gives each staff member their own skin and hair color |
 | `tools/sprites/make_sprites.py` | Draws the pixel-art staff and guest sprite sheets (`python3 tools/sprites/make_sprites.py`) |
+| `tools/sprites/make_furniture.py` | Draws the isometric furniture: table, brick stove (with fire frames) and the serving-hatch pass |
 
 ## Roadmap
 
@@ -141,7 +147,10 @@ All art is placeholder shapes drawn in code, so the scripts are the whole game:
    - ✅ Guest types with pixel-art looks: Farmer, Town Guard, Merchant,
      Old Regular, Adventurers (knight, mage, rogue), Lord and Lady
    - ⬜ More guests (bard, elf, dwarf miner, wizard, food critic...)
-   - ⬜ Sprites for furniture and floor
+   - ✅ Pixel-art furniture: plank trestle tables, brick stoves with a
+     flickering fire, a serving hatch for the pass
+   - ✅ Plates on tables, and waiters clear them after guests leave
+   - ⬜ Sprites for the floor and walls
    - Sound effects and music (they start after the first tap, as browsers require)
 7. ⬜ **UI moved into editable scenes**, so menus can be restyled in the
    Godot editor

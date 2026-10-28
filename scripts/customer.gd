@@ -17,7 +17,8 @@
 # come as a party sharing one table; if one storms off, they all go.
 #
 # Guests sit on a free square NEXT TO their table. A Waiter comes to
-# take the order, a Cook cooks it, and a Waiter carries it over.
+# take the order, a Cook cooks it, and a Waiter carries it over. When
+# they finish, their empty plate stays on the table for a Waiter to clear.
 # Walking around furniture comes from walker.gd (see "extends Walker").
 #
 # Each guest is drawn from their type's pixel-art sheet, recolored with
@@ -188,6 +189,7 @@ func _process(delta: float) -> void:
 					share += GuestTypes.GUARD_TIP
 				var price: int = roundi(order["price"] * share)
 				GameManager.earn(price)
+				grid.finish_dish(table_cell)   # leaves an empty plate behind
 				_bubble = "+%dg" % price
 				_start_leaving("served")
 
@@ -218,6 +220,7 @@ func serve_food() -> bool:
 		return false
 	state = State.EATING
 	_timer = EAT_TIME
+	grid.serve_dish(table_cell)
 	_patience_at_serve = patience
 	_bubble = "Yum!"
 	return true
