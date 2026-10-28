@@ -752,6 +752,7 @@ func _new_prop(kind: String, cell: Vector2i, at: Vector2) -> FloorProp:
 	prop.kind = kind
 	prop.cell = cell
 	prop.position = at
+	prop.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # crisp pixel art
 	_props_node.add_child(prop)
 	return prop
 
@@ -1070,25 +1071,33 @@ func _draw_block(prop: FloorProp, inset: float, height: float, top: Color, left:
 	return lift
 
 
+# Pixel-art furniture (drawn by tools/sprites/make_furniture.py). Each
+# frame is 64 x 72 with the middle of its square at (32, 58), drawn at 2x
+# like the characters.
+const TABLE_ART: Texture2D = preload("res://assets/sprites/furniture/table.png")
+const HEARTH_ART: Texture2D = preload("res://assets/sprites/furniture/hearth.png")
+const ART_FRAME := Vector2(64, 72)
+const ART_ANCHOR := Vector2(32, 58)
+const ART_SCALE: float = 2.0
+
+
+func _draw_art(prop: FloorProp, art: Texture2D, frame: int = 0) -> void:
+	var source := Rect2(Vector2(ART_FRAME.x * frame, 0), ART_FRAME)
+	prop.draw_texture_rect_region(art, Rect2(-ART_ANCHOR * ART_SCALE, ART_FRAME * ART_SCALE), source)
+
+
 func _draw_table(prop: FloorProp) -> void:
-	# Three visible legs, then the tabletop resting on them.
-	var leg := Color8(95, 60, 34)
-	var hw: float = TILE_W / 2.0 * 0.55
-	var hh: float = TILE_H / 2.0 * 0.55
-	for corner in [Vector2(-hw, 0), Vector2(0, hh), Vector2(hw, 0)]:
-		prop.draw_line(corner, corner + Vector2(0, -14), leg, 3.0)
-	_draw_block(prop, 0.62, 20.0, Color8(176, 116, 64), Color8(140, 90, 48), Color8(120, 76, 40), 14.0)
+	_draw_art(prop, TABLE_ART)
 
 
 func _draw_hearth(prop: FloorProp) -> void:
 	var font: Font = ThemeDB.fallback_font
-	var top: Vector2 = _draw_block(prop, 0.8, 34.0, Color8(70, 62, 60), Color8(165, 72, 52), Color8(135, 56, 42))
 	var h: Dictionary = hearths[prop.cell]
 	var cooking: bool = not h["job"].is_empty()
-	# The fire flickers while something is cooking.
-	var flicker: float = 1.0 + 0.15 * sin(Time.get_ticks_msec() / 90.0) if cooking else 0.8
-	prop.draw_circle(top, 10.0 * flicker, Color8(235, 120, 40))
-	prop.draw_circle(top, 5.0 * flicker, Color8(255, 210, 90))
+	# Frame 0 is the idle glow; while cooking, the fire cycles frames 1-3.
+	var frame: int = 1 + (Time.get_ticks_msec() / 140) % 3 if cooking else 0
+	_draw_art(prop, HEARTH_ART, frame)
+	var top := Vector2(0, -50)   # just above the stew pot
 	if cooking:
 		var job: Dictionary = h["job"]
 		var done: float = 1.0 - job["time_left"] / job["total"]
@@ -1107,8 +1116,6 @@ func _draw_expo(prop: FloorProp) -> void:
 		var spot: Vector2 = top + Vector2(-14 + i * 14, -2 + (i % 2) * 4)
 		prop.draw_circle(spot, 7.0, Color.WHITE)
 		prop.draw_circle(spot, 4.0, Color8(190, 110, 50))
-	prop.draw_string(ThemeDB.fallback_font, top + Vector2(-30, -14), "PASS",
-			HORIZONTAL_ALIGNMENT_CENTER, 60, 13, Color8(90, 60, 35))
 
 
 func _draw_front_wall(prop: FloorProp) -> void:

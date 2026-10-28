@@ -1,7 +1,9 @@
 """Pixel-art furniture for the isometric Drunken Dragon.
 
 Run from the repo root:  python3 tools/sprites/make_furniture.py
-It writes a preview sheet (furniture_options.png) next to this script.
+It writes the game's furniture sprites to assets/sprites/furniture/ and a
+preview sheet of options still being picked (furniture_options.png) next
+to this script.
 
 Furniture is built from simple 3D shapes (boxes and cylinders) and drawn
 in the same 2:1 isometric view as the floor. One square of floor is 48 x 24
@@ -228,8 +230,9 @@ def hearth_stone(frame=0):
     return p.finish()
 
 
-def hearth_stove(frame=0):
-    """A brick cooking range with an iron top, two pots and a fire door."""
+def hearth_stove(frame=0, lit=True):
+    """A brick cooking range with an iron top, two pots and a fire door.
+    Unlit (nobody cooking) it just glows; lit, the fire and steam move."""
     p = Piece()
     p.shadow(11)
     p.box(-10, -10, 0, 10, 10, 15, BRICK, shade(BRICK, 0.9), shade(BRICK, 0.72))
@@ -243,14 +246,14 @@ def hearth_stove(frame=0):
     p.box(-10, -10, 15, 10, 10, 17, IRON, shade(IRON, 1.2), shade(IRON, 0.9))
     # fire door in the front-left face
     p.poly([P(-5, 10, 3), P(3, 10, 3), P(3, 10, 10), P(-5, 10, 10)], (35, 25, 25, 255))
-    fire(p, -1, 10, 3.5, 3, frame)
+    fire(p, -1, 10, 3.5, 3 if lit else 1, frame)
     p.cylinder(-4, -4, 17, 23, 5, (70, 70, 78, 255), (120, 85, 50, 255))   # stew pot
     p.cylinder(5, 4, 17, 18, 4, (40, 40, 44, 255), (25, 25, 28, 255))      # frying pan
     p.line(P(9, 4, 18), P(12, 4, 18), (40, 40, 44, 255))
     sx, sy = P(5, 4, 18)
     p.px(sx - 1, sy, (250, 240, 200, 255)); p.px(sx + 1, sy, (240, 180, 60, 255))   # an egg
     sx, sy = P(-4, -4, 23)
-    for k in range(3):  # steam
+    for k in range(3 if lit else 0):  # steam
         p.px(sx + (1 if (k + frame) % 2 else -1), sy - 3 - k * 2, (235, 235, 235, 200))
     return p.finish()
 
@@ -283,50 +286,23 @@ def hearth_spit(frame=0):
 # The pass (where cooks leave plates and waiters pick them up). It needs
 # a flat top for up to three plates; the game draws the plates.
 # ---------------------------------------------------------------------
-def sign(p, x, y, z, w, h, board, letters):
-    """A board that faces the player, so the word is easy to read."""
-    cx, cy = P(x, y, z)
-    left, right = round(cx - 10), round(cx + 10)
-    top, bottom = round(cy - 8), round(cy)
-    p.d.rectangle([left, top, right, bottom], fill=board)
-    p.d.line([(left, bottom), (right, bottom)], fill=shade(board, 0.6))
-    p.d.line([(left, top), (right, top)], fill=shade(board, 1.2))
-    glyphs = {"P": ["111", "101", "111", "100", "100"], "A": ["010", "101", "111", "101", "101"],
-              "S": ["011", "100", "010", "001", "110"]}
-    for i, ch in enumerate("PASS"):
-        for r, row in enumerate(glyphs[ch]):
-            for c, bit in enumerate(row):
-                if bit == "1":
-                    p.px(left + 3 + i * 4 + c, top + 2 + r, letters)
-
-
-def pass_counter():
-    """A stone-topped wooden counter with a hanging board sign."""
+def pass_plain():
+    """A stone-topped wooden counter, nothing else."""
     p = Piece()
     p.shadow(11)
     p.box(-11, -9, 0, 11, 9, 12, OAK, shade(OAK, 0.85), shade(OAK, 0.68))
     for x in range(-7, 11, 6):   # panels
         p.line(P(x, 9, 2), P(x, 9, 10), OAK_DARK)
     p.box(-12, -10, 12, 12, 10, 14, (214, 200, 176, 255))
-    for x in (-10, 10):
-        p.box(x - 1, -9, 14, x + 1, -7, 34, OAK_DARK, edge=False)
-    p.line(P(-11, -8, 34), P(11, -8, 34), OAK_DARK)
-    sign(p, 0, -8, 25, 8, 7, (236, 214, 160, 255), (110, 50, 30, 255))
     return p.finish()
 
 
 def pass_bell():
-    """A long marble-topped counter with a brass bell and a chalkboard."""
+    """A marble-topped counter with a brass bell to ring when food's up."""
     p = Piece()
     p.shadow(11)
     p.box(-11, -9, 0, 11, 9, 12, (110, 80, 60, 255))
     p.box(-12, -10, 12, 12, 10, 14, (232, 232, 226, 255), (190, 190, 186, 255), (160, 160, 158, 255))
-    # a chalkboard on a little easel at the back
-    for dx in (-6, 6):
-        a = P(dx * 0.7, -8, 14)
-        p.line(a, (a[0] + dx * 0.3, a[1] - 16), (110, 80, 50, 255))
-    sign(p, 0, -8, 22, 8, 8, (54, 66, 58, 255), (235, 235, 225, 255))
-    # brass bell
     p.cylinder(8, 6, 14, 15, 3, (150, 110, 40, 255), (170, 130, 50, 255))
     p.cylinder(8, 6, 15, 18, 2, (215, 170, 60, 255), (240, 200, 90, 255))
     sx, sy = P(8, 6, 19)
@@ -335,20 +311,18 @@ def pass_bell():
 
 
 def pass_window():
-    """A serving hatch: low counter under a little tiled roof with a sign."""
+    """A serving hatch: a counter under a little tiled roof."""
     p = Piece()
     p.shadow(11)
     p.box(-11, -9, 0, 11, 9, 12, PINE, shade(PINE, 0.85), shade(PINE, 0.68))
     p.box(-12, -10, 12, 12, 10, 14, OAK)
     for x in (-11, 11):    # posts at the back corners
         p.box(x - 1, -10, 14, x + 1, -8, 30, OAK_DARK, edge=False)
-    # a small sloped roof
     roof = (170, 70, 50, 255)
     p.poly([P(-13, -11, 30), P(13, -11, 30), P(13, -4, 34), P(-13, -4, 34)], roof)
     p.poly([P(-13, -4, 34), P(13, -4, 34), P(13, -4, 32), P(-13, -4, 32)], shade(roof, 0.7))
     for x in range(-11, 13, 4):
         p.line(P(x, -11, 30), P(x, -4, 34), shade(roof, 0.8))
-    sign(p, 0, -6, 21, 8, 7, (236, 214, 160, 255), (110, 50, 30, 255))
     return p.finish()
 
 
@@ -416,20 +390,25 @@ if __name__ == "__main__":
         person(img, os.path.join(staff, "maid.png"), (0, 1))       # waiter in front
         return img
 
+    # The pieces the game uses (chosen: plank trestle table, brick stove).
+    out = os.path.join(root, "assets", "sprites", "furniture")
+    os.makedirs(out, exist_ok=True)
+    table_trestle().save(os.path.join(out, "table.png"))
+    # Hearth sheet: frame 0 is the idle glow, frames 1-3 the cooking fire.
+    hearth = Image.new("RGBA", (FW * 4, FH), (0, 0, 0, 0))
+    hearth.paste(hearth_stove(0, lit=False), (0, 0))
+    for f in range(3):
+        hearth.paste(hearth_stove(f, lit=True), (FW * (f + 1), 0))
+    hearth.save(os.path.join(out, "hearth.png"))
+
     rows = [
-        ("Tables", [("A  Round oak + candle", table_scene(table_round())),
-                    ("B  Plank trestle + mugs", table_scene(table_trestle())),
-                    ("C  Ale barrel", table_scene(table_barrel()))]),
-        ("Hearths", [("A  Stone fire + cauldron", hearth_scene(hearth_stone())),
-                     ("B  Brick stove", hearth_scene(hearth_stove())),
-                     ("C  Spit roast", hearth_scene(hearth_spit()))]),
-        ("Pass", [("A  Counter + hanging sign", pass_scene(pass_counter())),
-                  ("B  Marble, bell, chalkboard", pass_scene(pass_bell())),
-                  ("C  Serving hatch", pass_scene(pass_window()))]),
+        ("Pass (no sign)", [("A  Plain stone-topped counter", pass_scene(pass_plain())),
+                            ("B  Marble + brass bell", pass_scene(pass_bell())),
+                            ("C  Serving hatch", pass_scene(pass_window()))]),
     ]
     S = 2                   # the game's own size
     cw, ch = PW * S + 20, PH * S + 48
-    sheet = Image.new("RGBA", (cw * 3 + 10, ch * 3 + 10), (52, 46, 42, 255))
+    sheet = Image.new("RGBA", (cw * 3 + 10, ch * len(rows) + 10), (52, 46, 42, 255))
     d = ImageDraw.Draw(sheet)
     font = ImageFont.load_default(size=17)
     small = ImageFont.load_default(size=15)
