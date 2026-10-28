@@ -265,9 +265,10 @@ func _draw_overlay() -> void:
 		_overlay.draw_rect(Rect2(-25, 22, 50 * ratio, 7), Color(1.0 - ratio, ratio, 0.2))
 
 	if _bubble != "":
-		# Just wide enough for the words, so it covers as little as possible.
+		# Just the words, no box: white text with a dark outline so it reads
+		# on any floor, and covers as little of the room as possible.
 		var font: Font = ThemeDB.fallback_font
-		var width: float = font.get_string_size(_bubble, HORIZONTAL_ALIGNMENT_LEFT, -1, 19).x + 14.0
-		_overlay.draw_rect(Rect2(-width / 2.0, -96, width, 28), Color(0, 0, 0, 0.65))
-		_overlay.draw_string(font, Vector2(-width / 2.0, -75), _bubble,
-				HORIZONTAL_ALIGNMENT_CENTER, width, 19, Color.WHITE)
+		var width: float = font.get_string_size(_bubble, HORIZONTAL_ALIGNMENT_LEFT, -1, 19).x
+		var at := Vector2(-width / 2.0, -75)
+		_overlay.draw_string_outline(font, at, _bubble, HORIZONTAL_ALIGNMENT_CENTER, width, 19, 5, Color(0.12, 0.08, 0.05))
+		_overlay.draw_string(font, at, _bubble, HORIZONTAL_ALIGNMENT_CENTER, width, 19, Color.WHITE)
