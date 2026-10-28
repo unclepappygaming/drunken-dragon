@@ -18,13 +18,22 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 - **Waiters** take orders, fetch finished dishes from a Hearth and carry them
   to the table.
 - **Cooks** work the Hearths. A Hearth only cooks while a cook stands at it.
-- Every guest has a **patience bar**. If it runs out, they storm off and you
-  lose fame. Happy guests pay and raise your fame.
+- Every guest has a **patience bar**. If it runs out, they storm off.
+- **Fame** grows slowly, and comes from three places:
+  - **Nightly reviews**: the share of today's guests who left happy (anyone
+    who walked out, found nothing they liked, or never got a seat counts
+    against you). Glowing +2, Good +1, Mixed 0, Poor -1, Terrible -2.
+  - **Milestones**, once each: serve 25/100/250/500 guests, perfect days,
+    learning recipes, expanding, a triumphant banquet.
+  - **Banquets** (below).
+- Fame earns **ranks**: Unknown, Local Haunt (10), Town Favorite (25), Talk
+  of the Realm (45), Famed Hall (70), Legendary (100). More fame also brings
+  guests faster, so keep building to keep the reviews good.
 - More fame brings guests faster. At 25 fame you can host **Noble Banquets**
   (tap Open Day, then Host a Banquet, 150g, once every 3 days). A party of
   nobles (gold crowns) arrives between 12:00 and 15:00. They skip the line,
-  only order "Nobles only" dishes and tip 50%. Each happy noble is +2 fame,
-  each unhappy one -3, and if they all leave happy you get +5 bonus fame.
+  only order "Nobles only" dishes and tip 50%. If they all leave happy it's
+  a triumph (+5 fame); at least half is +2; fewer than half is -2.
 - **Recipes can't be bought.** Happy patrons share ideas, and quests (like
   "serve 12 Mushroom Stews") teach you new dishes. The recipe book shows
   every quest and your progress.
@@ -39,8 +48,8 @@ The bottom bar has four buttons:
     unlocked by a quest (like "Serve 60 guests"), then bought with gold.
 - **Staff** opens a tray to hire or fire cooks and waiters (between days
   only). Wages are paid every night.
-- **Recipes** opens the recipe book: pick up to 4 dishes for the menu and
-  check your quests.
+- **Recipes & Goals** opens the book: pick up to 4 dishes for the menu,
+  check your quests, and see your rank and milestones.
 - **Open Day** starts the next day (once banquets are unlocked, it asks
   whether to host one). The end-of-day summary closes with Continue, so you
   can build and hire first.
@@ -86,8 +95,8 @@ All art is placeholder shapes drawn in code, so the scripts are the whole game:
    - ✅ Nobles come only to Noble Banquets you host (unlocked at 25 fame)
 4. ⬜ **Balance pass**
    - Busy-hour rushes so a well-staffed tavern still feels stretched
-   - Slow down fame growth: a busy 6-table tavern can gain ~28 fame in one
-     day, because every happy guest gives +1
+   - ✅ Fame from nightly reviews, milestones and banquets instead of every
+     guest, with ranks from Unknown to Legendary
    - Tune prices, cook times, patience and wages against real play
 5. ✅ **Bigger tavern**
    - ✅ Four floor expansions up to 12 x 14, each earned by a quest, then bought

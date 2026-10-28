@@ -38,8 +38,9 @@ const STARTING_GOLD: int = 200
 const SAVE_PATH: String = "user://save.json"
 # Bump this if the save format ever changes, so old saves can be handled.
 # Version 2 added recipes and the menu, version 3 lifetime stats (for
-# quests), version 4 expansions and the door. Older saves still load.
-const SAVE_VERSION: int = 4
+# quests), version 4 expansions and the door, version 5 fame milestones.
+# Older saves still load.
+const SAVE_VERSION: int = 5
 
 # Everything the player can build. The key ("table") is the ID the
 # other scripts use; the inner Dictionary holds its details.
@@ -75,7 +76,7 @@ const RECIPES: Dictionary = {
 				"title": "The Bridge Troll", "task": "Serve 12 Mushroom Stews"}},
 	"wings":   {"name": "Wyvern Wings",     "price": 34, "cook_time": 6.5,  "tier": 2,
 			"unlock": {"by": "quest", "stat": "perfect_days", "goal": 1,
-				"title": "Hunter's Challenge", "task": "Finish a day with no walk-outs and 15+ guests served"}},
+				"title": "Hunter's Challenge", "task": "Finish a day with no walk-outs and 20+ guests served"}},
 	"wine":    {"name": "Elven Wine",       "price": 45, "cook_time": 5.0,  "tier": 3,
 			"unlock": {"by": "patron", "stat": "best_fame", "goal": 25,
 				"task": "A noble's steward may share it when your fame reaches 25",
@@ -97,9 +98,55 @@ const BANQUET_COST: int = 150
 const BANQUET_EVERY: int = 3     # days between banquets
 const BANQUET_START: int = 12
 const BANQUET_END: int = 15
-const BANQUET_BONUS_FAME: int = 5   # when every noble leaves happy
 const NOBLE_TIP: float = 0.5        # nobles pay 50% on top
-const PERFECT_DAY_GUESTS: int = 15   # guests needed for a "perfect day"
+const PERFECT_DAY_GUESTS: int = 20   # guests needed for a "perfect day"
+
+# ---------------------------------------------------------------------
+# FAME
+# Fame doesn't come from single guests. It comes from:
+#   * the daily review: what share of the day's guests left happy
+#   * one-time milestones
+#   * banquet results
+# ---------------------------------------------------------------------
+# [share of happy guests needed, fame, review name]. The first row that
+# matches is used. Fame-earning reviews also need REVIEW_MIN_SERVED
+# guests, so a tiny day can't earn them.
+const REVIEWS: Array = [
+	[0.9, 2, "Glowing"],
+	[0.75, 1, "Good"],
+	[0.5, 0, "Mixed"],
+	[0.25, -1, "Poor"],
+	[0.0, -2, "Terrible"],
+]
+const REVIEW_MIN_SERVED: int = 8
+
+# Banquet result: everyone happy / at least half / fewer than half.
+const BANQUET_FAME: Dictionary = {"triumph": 5, "good": 2, "poor": -2}
+
+# Each one awards fame once, the first time `stat` reaches `goal`.
+const MILESTONES: Array = [
+	{"id": "served_25", "stat": "served", "goal": 25, "fame": 1, "text": "Serve 25 guests"},
+	{"id": "served_100", "stat": "served", "goal": 100, "fame": 3, "text": "Serve 100 guests"},
+	{"id": "served_250", "stat": "served", "goal": 250, "fame": 5, "text": "Serve 250 guests"},
+	{"id": "served_500", "stat": "served", "goal": 500, "fame": 5, "text": "Serve 500 guests"},
+	{"id": "perfect_1", "stat": "perfect_days", "goal": 1, "fame": 2, "text": "Have a perfect day"},
+	{"id": "perfect_10", "stat": "perfect_days", "goal": 10, "fame": 5, "text": "Have 10 perfect days"},
+	{"id": "recipes_3", "stat": "recipes_learned", "goal": 3, "fame": 2, "text": "Learn 3 new recipes"},
+	{"id": "recipes_6", "stat": "recipes_learned", "goal": 6, "fame": 4, "text": "Learn every recipe"},
+	{"id": "expand_1", "stat": "expansions", "goal": 1, "fame": 3, "text": "Expand the tavern"},
+	{"id": "expand_4", "stat": "expansions", "goal": 4, "fame": 5, "text": "Build the full-size tavern"},
+	{"id": "triumph_1", "stat": "triumphs", "goal": 1, "fame": 3, "text": "Host a triumphant banquet"},
+]
+
+# [fame needed, title]. Your rank is the last one you've reached.
+const RANKS: Array = [
+	[0, "Unknown"],
+	[10, "Local Haunt"],
+	[25, "Town Favorite"],
+	[45, "Talk of the Realm"],
+	[70, "Famed Hall"],
+	[100, "Legendary"],
+]
 
 # Making the tavern bigger, one step at a time. Each step's quest has to
 # be done before you can pay for it. cols/rows = floor size afterwards.
@@ -111,7 +158,7 @@ const EXPANSIONS: Array = [
 	{"cols": 12, "rows": 12, "cost": 800, "stat": "nobles", "goal": 15,
 		"title": "Fit for Nobles", "task": "Serve 15 nobles"},
 	{"cols": 12, "rows": 14, "cost": 1200, "stat": "perfect_days", "goal": 2,
-		"title": "The Grand Hall", "task": "Have 2 perfect days (no walk-outs, 15+ guests)"},
+		"title": "The Grand Hall", "task": "Have 2 perfect days (no walk-outs, 20+ guests)"},
 ]
 
 # ---------------------------------------------------------------------
@@ -299,6 +346,15 @@ func load_game() -> Dictionary:
 	stats["best_fame"] = maxi(stat("best_fame"), fame)
 	# Saves from before expansions: the original floor.
 	expansions_built = clampi(int(parsed.get("expansions", 0)), 0, EXPANSIONS.size())
+	if version < 5:
+		# Older saves already earned fame the old way, so milestones they've
+		# passed are marked done without paying out again.
+		stats["recipes_learned"] = known_recipes.size() - STARTER_RECIPES.size()
+		stats["expansions"] = expansions_built
+		for milestone in MILESTONES:
+			if stat(milestone["stat"]) >= milestone["goal"]:
+				stats["m:" + milestone["id"]] = 1
+		stats["best_rank"] = rank_index(fame)
 	gold_changed.emit(gold)
 	fame_changed.emit(fame)
 	return parsed
@@ -398,6 +454,7 @@ func check_unlocks() -> Array[String]:
 				menu.append(id)
 			unlocked.append(id)
 			today_unlocked.append(id)
+			add_stat("recipes_learned")
 	if not unlocked.is_empty():
 		recipes_changed.emit()
 	return unlocked
@@ -504,9 +561,9 @@ func banquet_blocker() -> String:
 	return ""
 
 
-# 3 nobles at 25 fame, one more for every 10 fame after that, up to 8.
+# 3 nobles at 25 fame, one more for every 15 fame after that, up to 8.
 func banquet_party_size() -> int:
-	return mini(8, 3 + floori(maxi(0, fame - NOBLE_FAME) / 10.0))
+	return mini(8, 3 + floori(maxi(0, fame - NOBLE_FAME) / 15.0))
 
 
 # Returns true the first time banquets become available (to announce it once).
@@ -523,8 +580,68 @@ func change_fame(amount: int) -> void:
 	fame_changed.emit(fame)
 
 
-# More fame = guests arrive more often (6 seconds at 0 fame, down to 1.5).
-# Guests you turn away cost fame, so fame settles at whatever your
-# tavern can actually seat. Build more Tables to grow it further.
+# More fame = guests arrive more often (6 seconds at 0 fame, down to 1.5
+# at 90). Turning guests away spoils the daily review, so build more
+# Tables as fame grows.
 func get_spawn_interval() -> float:
-	return max(1.5, 6.0 - fame * 0.1)
+	return max(1.5, 6.0 - fame * 0.05)
+
+
+# ---------------------------------------------------------------------
+# REVIEWS, MILESTONES AND RANKS
+# ---------------------------------------------------------------------
+# Today's review: {"happy": share of happy guests (0-1), "fame": change,
+# "name": "Glowing" etc.}. Everyone who left unhappy or never got a seat
+# counts against it.
+func daily_review() -> Dictionary:
+	var unhappy: int = today_walkouts + today_disappointed + today_turned_away
+	var total: int = today_served + unhappy
+	if total == 0:
+		return {"happy": 0.0, "fame": 0, "name": "No"}
+	var happy: float = float(today_served) / total
+	for row in REVIEWS:
+		if happy >= row[0]:
+			# A tiny day can't earn a glowing or good review.
+			if row[1] > 0 and today_served < REVIEW_MIN_SERVED:
+				continue
+			return {"happy": happy, "fame": row[1], "name": row[2]}
+	return {"happy": happy, "fame": -2, "name": "Terrible"}
+
+
+# Awards every milestone just reached. Returns them so main.gd can
+# announce them.
+func check_milestones() -> Array:
+	var reached: Array = []
+	for milestone in MILESTONES:
+		if stat("m:" + milestone["id"]) > 0 or stat(milestone["stat"]) < milestone["goal"]:
+			continue
+		stats["m:" + milestone["id"]] = 1
+		change_fame(milestone["fame"])
+		reached.append(milestone)
+	return reached
+
+
+func milestone_done(milestone: Dictionary) -> bool:
+	return stat("m:" + milestone["id"]) > 0
+
+
+# Position in RANKS for a fame value.
+func rank_index(value: int) -> int:
+	var index: int = 0
+	for i in RANKS.size():
+		if value >= RANKS[i][0]:
+			index = i
+	return index
+
+
+func rank_name() -> String:
+	return RANKS[rank_index(fame)][1]
+
+
+# Returns the new rank's title the first time you reach it, otherwise "".
+func check_rank_up() -> String:
+	var index: int = rank_index(fame)
+	if index <= stat("best_rank"):
+		return ""
+	stats["best_rank"] = index
+	return RANKS[index][1]

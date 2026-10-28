@@ -7,8 +7,9 @@
 #   * hires and lets go of staff (only between days)
 #   * tells the grid which build tool the HUD selected
 #   * runs Noble Banquets: invited nobles arrive at midday
-#   * frees tables, changes fame and records stats when guests leave
-#   * announces recipes and expansions earned from quests
+#   * frees tables and records stats when guests leave
+#   * gives fame for the daily review, banquets and milestones
+#   * announces recipes, expansions, milestones and new ranks
 #   * builds expansions and keeps the camera fitted to the floor
 #   * shows the end-of-day summary once the last guest is gone
 #   * loads the saved game at startup and saves between days
@@ -152,11 +153,10 @@ func _on_spawn_timer_timeout() -> void:
 		_line.append(customer)
 		customer.wait_in_line(_line_spot(_line.size() - 1))
 	else:
-		# A long line hurts your reputation, so more fame alone can't
-		# outgrow your seating.
+		# Turned-away guests count against today's review, so more fame
+		# alone can't outgrow your seating.
 		GameManager.today_turned_away += 1
-		GameManager.change_fame(-1)
-		hud.show_message("The line is full! A guest left (-1 fame)")
+		hud.show_message("The line is full! A guest went elsewhere.")
 	# Restart with a fresh interval — higher fame means shorter waits.
 	spawn_timer.start(GameManager.get_spawn_interval())
 
@@ -212,25 +212,21 @@ func _on_customer_left(customer: Customer, _happy: bool) -> void:
 	grid.release_table(customer.table_cell)
 	_line.erase(customer)
 
+	# Single guests don't change fame; they all count toward tonight's
+	# review (and nobles toward the banquet result).
 	match customer.leave_reason:
 		"served":
 			GameManager.today_served += 1
 			if customer.is_noble:
 				GameManager.today_nobles_served += 1
 			GameManager.record_served(customer.order["id"], customer.is_noble)
-			GameManager.change_fame(2 if customer.is_noble else 1)
 		"impatient":
-			# Nobles matter more to your reputation.
 			GameManager.today_walkouts += 1
-			GameManager.change_fame(-3 if customer.is_noble else -2)
 		"no_dish":
-			# An invited noble with nothing to eat is an insult.
 			GameManager.today_disappointed += 1
-			GameManager.change_fame(-3 if customer.is_noble else -1)
 		"gave_up_line":
 			GameManager.today_turned_away += 1
-			GameManager.change_fame(-3 if customer.is_noble else -1)
-		# "closed": sent home at closing time, no fame change.
+		# "closed": sent home at closing time, it doesn't count.
 
 	_announce_unlocks(GameManager.check_unlocks(), customer)
 	_seat_from_line()
@@ -252,6 +248,19 @@ func _announce_unlocks(ids: Array[String], speaker: Customer) -> void:
 	if expansion_quest != "":
 		hud.show_message("Quest done: %s! You can expand the tavern (Build > Expand)." % expansion_quest, 6.0)
 		GameManager.today_news.append("You can expand the tavern (Build > Expand).")
+	_announce_fame()
+
+
+# Milestones reached and new ranks. Milestones can give fame, which can
+# reach a new rank, which can unlock banquets, so check in that order.
+func _announce_fame() -> void:
+	for milestone in GameManager.check_milestones():
+		hud.show_message("Milestone: %s! +%d fame" % [milestone["text"], milestone["fame"]], 5.0)
+		GameManager.today_news.append("Milestone: %s (+%d fame)" % [milestone["text"], milestone["fame"]])
+	var rank: String = GameManager.check_rank_up()
+	if rank != "":
+		hud.show_message("Your tavern is now known as a %s!" % rank, 6.0)
+		GameManager.today_news.append("New rank: %s!" % rank)
 	if GameManager.check_banquet_unlock():
 		hud.show_message("Nobles have heard of you! Host a Noble Banquet from Open Day.", 6.0)
 		GameManager.today_news.append("Nobles have heard of you! You can now host Noble Banquets.")
@@ -268,10 +277,12 @@ func _on_expand_requested() -> void:
 		hud.show_message("Not enough gold (%dg)." % next["cost"])
 		return
 	GameManager.expansions_built += 1
+	GameManager.add_stat("expansions")
+	hud.show_message("The tavern grew to %d x %d!" % [next["cols"], next["rows"]], 4.0)
+	_announce_fame()
 	grid.resize(next["cols"], next["rows"])   # also saves, via layout_changed
 	_fit_camera()
 	hud.close_expand_panel()
-	hud.show_message("The tavern grew to %d x %d!" % [next["cols"], next["rows"]], 4.0)
 
 
 func _on_shop_closed(_day: int) -> void:
@@ -351,14 +362,24 @@ func _show_day_summary() -> void:
 			get_tree().get_nodes_in_group("waiters").size())
 	GameManager.pay_wages(wages)
 	GameManager.finish_day()
+
+	# Tonight's fame: the review first, then the banquet result.
+	var review: Dictionary = GameManager.daily_review()
+	GameManager.change_fame(review["fame"])
+	var banquet_line: String = ""
 	if GameManager.banquet_today:
 		var guests: int = GameManager.today_banquet_nobles
 		var happy: int = GameManager.today_nobles_served
+		var result: String = "poor"
 		if guests > 0 and happy == guests:
-			GameManager.change_fame(GameManager.BANQUET_BONUS_FAME)
-			GameManager.today_news.append("A triumphant banquet! All %d nobles left happy (+%d fame)." % [guests, GameManager.BANQUET_BONUS_FAME])
-		else:
-			GameManager.today_news.append("Banquet: %d of %d nobles left happy." % [happy, guests])
+			result = "triumph"
+			GameManager.add_stat("triumphs")
+		elif happy * 2 >= guests:
+			result = "good"
+		var change: int = GameManager.BANQUET_FAME[result]
+		GameManager.change_fame(change)
+		var title: String = {"triumph": "A triumphant banquet!", "good": "A pleasant banquet.", "poor": "The nobles were not impressed."}[result]
+		banquet_line = "%s %d of %d nobles left happy (%+d fame)." % [title, happy, guests, change]
 	_announce_unlocks(GameManager.check_unlocks(), null)
 	_save_if_closed()
 
@@ -374,7 +395,11 @@ func _show_day_summary() -> void:
 	]
 	if GameManager.today_disappointed > 0:
 		text += "\nNothing they liked: %d" % GameManager.today_disappointed
-	text += "\n\nFame: %d\nGold: %d" % [GameManager.fame, GameManager.gold]
+	if review["name"] != "No":
+		text += "\n\n%s reviews: %d%% happy (%+d fame)" % [review["name"], roundi(review["happy"] * 100), review["fame"]]
+	if banquet_line != "":
+		text += "\n" + banquet_line
+	text += "\n\nFame: %d (%s)\nGold: %d" % [GameManager.fame, GameManager.rank_name(), GameManager.gold]
 	if not GameManager.today_unlocked.is_empty():
 		var names: Array[String] = []
 		for id in GameManager.today_unlocked:

@@ -162,7 +162,7 @@ func _on_gold_changed(amount: int) -> void:
 
 
 func _on_fame_changed(amount: int) -> void:
-	_fame_label.text = "Fame: %d" % amount
+	_fame_label.text = "Fame: %d  %s" % [amount, GameManager.rank_name()]
 
 
 func _on_clock_changed(hour: int, minute: int) -> void:
@@ -348,7 +348,7 @@ func _build_top_bar() -> void:
 	_gold_label = _make_label(34)
 	_gold_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(_gold_label)
-	_fame_label = _make_label(34)
+	_fame_label = _make_label(28)
 	row.add_child(_fame_label)
 
 	var row2 := HBoxContainer.new()
@@ -379,7 +379,7 @@ func _build_bottom_bar() -> void:
 	_build_button.pressed.connect(_on_tray_button.bind("build"))
 	_staff_button = _make_button("Staff", 28, row)
 	_staff_button.pressed.connect(_on_tray_button.bind("staff"))
-	var recipes := _make_button("Recipes", 28, row)
+	var recipes := _make_button("Recipes\n& Goals", 24, row)
 	recipes.pressed.connect(_on_recipes_button)
 	_day_button = _make_button("Open\nDay 1", 26, row)
 	_day_button.pressed.connect(_on_day_button)
@@ -554,6 +554,8 @@ func _refresh_recipes() -> void:
 		button.pressed.connect(_on_menu_toggle_pressed.bind(id))
 		row.add_child(button)
 
+	_add_goals()
+
 
 # The expansion card: what the next expansion adds, its quest, the cost,
 # and a button to build it once the quest is done.
@@ -636,3 +638,36 @@ func _build_plan_panel() -> void:
 	normal.pressed.connect(_on_plan_chosen.bind(false))
 	var cancel := _make_button("Not yet", 22, vbox, 66)
 	cancel.pressed.connect(func(): _plan_panel.visible = false)
+
+
+# The goals part of the book: your fame rank, what the next rank needs,
+# and every milestone with its progress.
+func _add_goals() -> void:
+	var heading := _make_label(28)
+	heading.text = "\nFame and Milestones"
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_recipe_list.add_child(heading)
+
+	var ranks: Array = GameManager.RANKS
+	var index: int = GameManager.rank_index(GameManager.fame)
+	var rank := _make_label(21)
+	rank.autowrap_mode = TextServer.AUTOWRAP_WORD
+	rank.text = "Rank: %s (%d fame)." % [ranks[index][1], GameManager.fame]
+	if index + 1 < ranks.size():
+		rank.text += " Next: %s at %d fame." % [ranks[index + 1][1], ranks[index + 1][0]]
+	rank.text += "\nFame comes from nightly reviews (keep guests happy and seated), banquets and milestones."
+	_recipe_list.add_child(rank)
+
+	for milestone in GameManager.MILESTONES:
+		var row := HBoxContainer.new()
+		_recipe_list.add_child(row)
+		var done: bool = GameManager.milestone_done(milestone)
+		var label := _make_label(21)
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.text = "%s  (+%d fame)" % [milestone["text"], milestone["fame"]]
+		label.modulate = Color(0.6, 1.0, 0.6) if done else Color.WHITE
+		row.add_child(label)
+		var progress := _make_label(21)
+		progress.text = "Done" if done else "%d/%d" % [mini(GameManager.stat(milestone["stat"]), milestone["goal"]), milestone["goal"]]
+		progress.modulate = Color(0.6, 1.0, 0.6) if done else Color(1.0, 0.85, 0.5)
+		row.add_child(progress)
