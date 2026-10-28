@@ -62,9 +62,12 @@ func _process(delta: float) -> void:
 			# Look for a Hearth that has no cook. (Cheap, so every frame is fine.)
 			var cell: Vector2i = grid.claim_hearth(self)
 			if cell != TavernGrid.NO_CELL:
+				end_standby()
 				hearth_cell = cell
 				go_to_cell(grid.access_cell(cell, position, self))
 				state = State.WALKING_TO_HEARTH
+			else:
+				idle_standby(delta)   # no free Hearth: wait inside, out of the way
 
 		State.WALKING_TO_HEARTH:
 			if _walk(delta):

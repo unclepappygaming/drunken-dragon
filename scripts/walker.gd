@@ -32,6 +32,11 @@ var _going_outside: bool = false
 # True when no route exists right now. We try again on the next layout change.
 var _stuck: bool = false
 
+# --- Standby (staff with nothing to do) ---
+const STANDBY_DELAY: float = 1.5   # seconds idle before heading to standby
+var _idle_time: float = 0.0
+var _on_standby: bool = false
+
 # --- Sprite drawing ---
 const WALK_FPS: float = 6.0       # walk-cycle frames per second
 const SPRITE_SCALE: float = 2.0   # sheet pixels -> world pixels
@@ -69,6 +74,27 @@ func go_to_outside_spot(point: Vector2) -> void:
 	_going_outside = true
 	_outside_target = point
 	_plan_route()
+
+
+# Call every frame while a staff member has nothing to do. New hires
+# (still outside) head in right away; anyone else waits a moment, then
+# walks to a standby spot near the kitchen, off the guests' seats.
+func idle_standby(delta: float) -> void:
+	if _on_standby:
+		_walk(delta)
+		return
+	_idle_time += delta
+	if current_cell() == TavernGrid.NO_CELL or _idle_time >= STANDBY_DELAY:
+		var spot: Vector2i = grid.standby_cell(self)
+		if spot != TavernGrid.NO_CELL and spot != current_cell():
+			go_to_cell(spot)
+		_on_standby = true
+
+
+# Call when a staff member gets a job, so the next idle spell starts fresh.
+func end_standby() -> void:
+	_on_standby = false
+	_idle_time = 0.0
 
 
 # Walk out through the front door.

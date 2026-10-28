@@ -260,6 +260,37 @@ func access_cell(furniture_cell: Vector2i, from_pos: Vector2, asker: Node = null
 	return best
 
 
+# Where staff with nothing to do wait: a free square near the kitchen
+# (the first Hearth) or the middle of the room. Not the doorway, not a
+# square someone else is using, and preferably not beside a table, since
+# that's where guests sit. NO_CELL if there's nowhere to go.
+func standby_cell(asker: Node) -> Vector2i:
+	var anchor: Vector2 = Vector2(cols, rows) / 2.0
+	if not hearths.is_empty():
+		anchor = Vector2(hearths.keys()[0])
+	var in_use: Dictionary = _cells_in_use(asker)
+	var choices: Array = []
+	for x in cols:
+		for y in rows:
+			var spot := Vector2i(x, y)
+			if furniture.has(spot) or spot == door_cell or in_use.has(spot):
+				continue
+			var score: float = Vector2(spot).distance_to(anchor)
+			for side in SIDES:
+				if furniture.get(spot + side, "") == "table":
+					score += 10.0
+			choices.append([score, spot])
+	choices.sort_custom(func(a, b): return a[0] < b[0])
+	var start: Vector2i = asker.current_cell()
+	if start == NO_CELL:
+		start = door_cell
+	# The closest one we can actually walk to.
+	for choice in choices:
+		if not find_path(start, choice[1]).is_empty():
+			return choice[1]
+	return NO_CELL
+
+
 func find_free_table() -> Vector2i:
 	var free: Array[Vector2i] = []
 	for cell in table_owner:

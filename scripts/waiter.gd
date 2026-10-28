@@ -53,6 +53,8 @@ func _process(delta: float) -> void:
 	match state:
 		State.IDLE:
 			_find_task()
+			if state == State.IDLE:
+				idle_standby(delta)   # nothing to do: wait inside, out of the way
 
 		State.TO_GUEST:
 			if not _guest_is(Customer.State.WAITING_FOR_WAITER):
@@ -114,6 +116,7 @@ func _find_task() -> void:
 	# Finished food first.
 	var hearth: Vector2i = grid.claim_ready_plate(self)
 	if hearth != TavernGrid.NO_CELL:
+		end_standby()
 		_hearth = hearth
 		go_to_cell(grid.access_cell(hearth, position, self))
 		state = State.TO_HEARTH
@@ -121,6 +124,7 @@ func _find_task() -> void:
 
 	var guest: Customer = GameManager.next_order_request()
 	if guest != null:
+		end_standby()
 		_guest = guest
 		go_to_cell(grid.access_cell(guest.table_cell, position, self))
 		state = State.TO_GUEST
