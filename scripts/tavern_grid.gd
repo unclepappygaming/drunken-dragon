@@ -1,11 +1,15 @@
 # =====================================================================
 # tavern_grid.gd  —  the tavern floor. Attached to the TavernGrid node.
 #
-# The floor is a grid of squares, 8 x 10 to start. Expansions add
+# The floor is a grid of squares, 8 x 10 to start, shown ISOMETRIC:
+# every square is drawn as a diamond, so the room is seen from a corner.
+# The grid underneath is still plain squares (x across, y down); only
+# where they appear on screen changes (see iso() and _cell_at()). Expansions add
 # columns on the right and rows at the bottom, so existing squares keep
 # their coordinates. Each square can hold one piece of furniture.
 # This script:
-#   * draws the floor, walls, door and furniture
+#   * draws the floor, back walls and door; tables, Hearths and the low
+#     front walls are FloorProp nodes so people can walk behind them
 #   * handles taps to build/remove furniture and move the door
 #   * finds walking routes around the furniture (pathfinding)
 #   * tracks which tables are taken
@@ -23,7 +27,12 @@ signal layout_changed
 
 const START_COLS: int = 8
 const START_ROWS: int = 10
-const CELL_SIZE: int = 80
+# One square on screen: a diamond this wide and tall (2:1, the classic
+# isometric shape).
+const TILE_W: float = 96.0
+const TILE_H: float = 48.0
+const WALL_HEIGHT: float = 76.0       # the tall back walls
+const LOW_WALL_HEIGHT: float = 16.0   # the front walls you can see over
 const NO_CELL: Vector2i = Vector2i(-1, -1)   # "nothing found" marker
 const DOOR_COST: int = 100
 # Which way is "outside" for each wall.
@@ -64,9 +73,14 @@ var hearths: Dictionary = {}
 # furniture squares as "solid" and it finds the shortest way around them.
 var _astar := AStarGrid2D.new()
 
+# The y-sorted node that holds every FloorProp (see main.tscn).
+@onready var _props_node: Node2D = get_node("../Props")
+var _props: Dictionary = {}          # furniture cell -> its FloorProp
+var _wall_props: Array[FloorProp] = []
+
 
 func _ready() -> void:
-	_astar.cell_size = Vector2(CELL_SIZE, CELL_SIZE)
+	_astar.cell_size = Vector2.ONE   # only the square numbers matter
 	# Diagonal steps are allowed, but never squeezing between two pieces
 	# of furniture or cutting a corner.
 	_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
@@ -89,9 +103,14 @@ func handle_tap(world_pos: Vector2) -> void:
 		_try_build(cell)
 
 
-# The floor itself, in Main's space.
+# The floor and back walls, in Main's space: the box around the diamond.
 func play_rect() -> Rect2:
-	return Rect2(position, Vector2(cols * CELL_SIZE, rows * CELL_SIZE))
+	var top: Vector2 = iso(Vector2(0, 0))
+	var right: Vector2 = iso(Vector2(cols, 0))
+	var bottom: Vector2 = iso(Vector2(cols, rows))
+	var left: Vector2 = iso(Vector2(0, rows))
+	var box := Rect2(Vector2(left.x, top.y - WALL_HEIGHT), Vector2(right.x - left.x, bottom.y - top.y + WALL_HEIGHT))
+	return Rect2(position + box.position, box.size)
 
 
 # The floor plus room for the doorstep on every side. The camera stays over it.
@@ -120,6 +139,9 @@ func set_door(side: String, index: int) -> void:
 	door_side = side
 	door_index = clampi(index, 0, wall_length - 1)
 	door_cell = _door_cell_for(door_side, door_index)
+	if is_node_ready():
+		_rebuild_front_walls()   # the doorway is a gap in the front wall
+		queue_redraw()
 
 
 # The door as plain data for the save file.
@@ -134,6 +156,7 @@ func _apply_size() -> void:
 	_astar.update()
 	for cell in furniture:
 		_astar.set_point_solid(cell, true)
+	_rebuild_front_walls()
 	queue_redraw()
 
 
@@ -197,27 +220,40 @@ func _process(delta: float) -> void:
 				h["plate_for"] = job["customer"]   # ready for a waiter
 				h["job"] = {}
 	queue_redraw()
+	# Hearths show cooking progress and plates, so redraw them every frame.
+	for cell in hearths:
+		_props[cell].queue_redraw()
 
 
 # ---------------------------------------------------------------------
 # Helpers the other scripts use. Positions are in Main's space
 # (we add our own `position` because the grid is offset on screen).
 # ---------------------------------------------------------------------
+# ISOMETRIC PROJECTION: turns a grid position (in squares, can be
+# fractional) into a screen offset from the grid's top corner. One
+# square right goes down-right on screen; one square down goes down-left.
+func iso(grid_pos: Vector2) -> Vector2:
+	return Vector2((grid_pos.x - grid_pos.y) * TILE_W / 2.0, (grid_pos.x + grid_pos.y) * TILE_H / 2.0)
+
+
 func cell_center(cell: Vector2i) -> Vector2:
-	return position + Vector2(cell) * CELL_SIZE + Vector2(CELL_SIZE, CELL_SIZE) / 2.0
+	return position + iso(Vector2(cell) + Vector2(0.5, 0.5))
 
 
 # Just outside the front door, where people appear and disappear.
 func door_position() -> Vector2:
-	return cell_center(door_cell) + OUTWARD[door_side] * (CELL_SIZE / 2.0 + 30.0)
+	return cell_center(door_cell) + iso(OUTWARD[door_side]) * 0.95
 
 
-# Which way the waiting line runs along the outside wall: toward the
-# longer stretch of wall, so it has room.
+# Which way the waiting line runs along the outside wall (a screen
+# direction): toward the longer stretch of wall, so it has room.
 func line_direction() -> Vector2:
+	var along: Vector2
 	if door_side in ["top", "bottom"]:
-		return Vector2(-1, 0) if door_index >= cols / 2.0 else Vector2(1, 0)
-	return Vector2(0, 1) if door_index < rows / 2.0 else Vector2(0, -1)
+		along = Vector2(-1, 0) if door_index >= cols / 2.0 else Vector2(1, 0)
+	else:
+		along = Vector2(0, 1) if door_index < rows / 2.0 else Vector2(0, -1)
+	return iso(along).normalized()
 
 
 # Which square a Main-space position is on (NO_CELL if off the floor).
@@ -335,6 +371,8 @@ func get_layout() -> Array:
 # Replaces all furniture with a saved layout. Called before any staff
 # or guests exist, so nobody needs a new route.
 func load_layout(layout: Array) -> void:
+	for cell in _props.keys():
+		_remove_prop(cell)
 	furniture.clear()
 	table_owner.clear()
 	hearths.clear()
@@ -386,6 +424,45 @@ func _place(cell: Vector2i, type: String) -> void:
 		table_owner[cell] = null
 	elif type == "kitchen":
 		hearths[cell] = {"cook": null, "job": {}, "plate_for": null, "plate_taker": null}
+	# Its FloorProp stands at the square's middle, for y-sorting.
+	_props[cell] = _new_prop(type, cell, cell_center(cell))
+
+
+func _new_prop(kind: String, cell: Vector2i, at: Vector2) -> FloorProp:
+	var prop := FloorProp.new()
+	prop.grid = self
+	prop.kind = kind
+	prop.cell = cell
+	prop.position = at
+	_props_node.add_child(prop)
+	return prop
+
+
+func _remove_prop(cell: Vector2i) -> void:
+	if _props.has(cell):
+		_props[cell].queue_free()
+		_props.erase(cell)
+
+
+# The low front walls (bottom and right edges), one FloorProp per edge
+# square, placed at the square's bottom corner so people inside are
+# drawn behind the wall and people outside in front of it.
+func _rebuild_front_walls() -> void:
+	for prop in _wall_props:
+		prop.queue_free()
+	_wall_props.clear()
+	for x in cols:
+		for y in rows:
+			var edges: Array = []
+			if y == rows - 1 and not (door_side == "bottom" and door_cell == Vector2i(x, y)):
+				edges.append("bottom")
+			if x == cols - 1 and not (door_side == "right" and door_cell == Vector2i(x, y)):
+				edges.append("right")
+			if edges.is_empty():
+				continue
+			var prop := _new_prop("wall", Vector2i(x, y), position + iso(Vector2(x + 1, y + 1)))
+			prop.edges = edges
+			_wall_props.append(prop)
 
 
 func _try_remove(cell: Vector2i) -> void:
@@ -410,6 +487,7 @@ func _try_remove(cell: Vector2i) -> void:
 	furniture.erase(cell)
 	table_owner.erase(cell)
 	hearths.erase(cell)
+	_remove_prop(cell)
 	_astar.set_point_solid(cell, false)
 	layout_changed.emit()
 	build_message.emit("Sold for %dg." % refund)
@@ -503,8 +581,11 @@ func _in_bounds(cell: Vector2i) -> bool:
 	return cell.x >= 0 and cell.y >= 0 and cell.x < cols and cell.y < rows
 
 
+# The reverse of iso(): which square a screen offset lands on.
 func _cell_at(local_pos: Vector2) -> Vector2i:
-	var cell := Vector2i(floori(local_pos.x / CELL_SIZE), floori(local_pos.y / CELL_SIZE))
+	var across: float = local_pos.x / (TILE_W / 2.0)
+	var down: float = local_pos.y / (TILE_H / 2.0)
+	var cell := Vector2i(floori((across + down) / 2.0), floori((down - across) / 2.0))
 	if not _in_bounds(cell):
 		return NO_CELL
 	return cell
@@ -524,69 +605,156 @@ func _pop_next_order() -> Customer:
 
 
 # ---------------------------------------------------------------------
-# Drawing (placeholder art)
+# Drawing (simple shapes for now; the art pass replaces them)
 # ---------------------------------------------------------------------
-func _draw() -> void:
-	var font: Font = ThemeDB.fallback_font
-	var floor_size := Vector2(cols * CELL_SIZE, rows * CELL_SIZE)
+const FLOOR_A := Color8(237, 201, 138)
+const FLOOR_B := Color8(226, 185, 118)
+const FLOOR_LINE := Color8(205, 160, 98)
+const PLASTER_TOP := Color8(240, 226, 194)    # back wall along the top edge
+const PLASTER_LEFT := Color8(224, 208, 174)   # back wall along the left edge (shadier)
+const PANEL_TOP := Color8(152, 100, 60)
+const PANEL_LEFT := Color8(134, 87, 52)
+const TRIM := Color8(105, 66, 38)
 
-	# Checkerboard wooden floor.
+
+# The four corners of a square's diamond, in this node's space.
+func _diamond(cell: Vector2i) -> PackedVector2Array:
+	var x: float = cell.x
+	var y: float = cell.y
+	return PackedVector2Array([iso(Vector2(x, y)), iso(Vector2(x + 1, y)),
+			iso(Vector2(x + 1, y + 1)), iso(Vector2(x, y + 1))])
+
+
+# Floor, back walls, doormat and build-mode markings. Everything people
+# can stand behind is a FloorProp instead (see draw_prop).
+func _draw() -> void:
+	# Floor tiles.
 	for x in cols:
 		for y in rows:
-			var shade: float = 0.38 if (x + y) % 2 == 0 else 0.33
-			draw_rect(Rect2(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE),
-					Color(shade, shade * 0.72, shade * 0.5))
+			var tile: PackedVector2Array = _diamond(Vector2i(x, y))
+			draw_colored_polygon(tile, FLOOR_A if (x + y) % 2 == 0 else FLOOR_B)
+			draw_polyline(tile + PackedVector2Array([tile[0]]), FLOOR_LINE, 1.0)
 
-	# Faint grid lines while building, so squares are easy to see,
-	# and a red tint on the doorway, which can't be built on.
+	# Doormat on the doorway square.
+	var mat: PackedVector2Array = _diamond(door_cell)
+	var middle: Vector2 = iso(Vector2(door_cell) + Vector2(0.5, 0.5))
+	for i in mat.size():
+		mat[i] = middle + (mat[i] - middle) * 0.7
+	draw_colored_polygon(mat, Color8(170, 60, 50))
+
+	# Back walls: the top edge (upper right on screen) and the left edge
+	# (upper left). Each wall piece is a floor edge pushed straight up.
+	for x in cols:
+		_draw_back_wall(iso(Vector2(x, 0)), iso(Vector2(x + 1, 0)), PLASTER_TOP, PANEL_TOP,
+				door_side == "top" and door_index == x, x % 3 == 1)
+	for y in rows:
+		_draw_back_wall(iso(Vector2(0, y)), iso(Vector2(0, y + 1)), PLASTER_LEFT, PANEL_LEFT,
+				door_side == "left" and door_index == y, y % 3 == 1)
+
+	# Build mode: outline every square, tint the doorway, and with the
+	# Door tool, show every edge square the door could move to.
 	if build_type != "":
-		for x in cols + 1:
-			draw_line(Vector2(x * CELL_SIZE, 0), Vector2(x * CELL_SIZE, floor_size.y), Color(1, 1, 1, 0.25), 2.0)
-		for y in rows + 1:
-			draw_line(Vector2(0, y * CELL_SIZE), Vector2(floor_size.x, y * CELL_SIZE), Color(1, 1, 1, 0.25), 2.0)
-		draw_rect(Rect2(Vector2(door_cell) * CELL_SIZE, Vector2(CELL_SIZE, CELL_SIZE)), Color(1, 0.2, 0.2, 0.2))
-	# With the Door tool, show every square along the walls it could go.
-	if build_type == "door":
 		for x in cols:
 			for y in rows:
 				var spot := Vector2i(x, y)
-				if _side_of(spot) != "" and spot != door_cell and not furniture.has(spot):
-					draw_rect(Rect2(Vector2(spot) * CELL_SIZE, Vector2(CELL_SIZE, CELL_SIZE)), Color(1.0, 0.85, 0.3, 0.18))
+				var tile: PackedVector2Array = _diamond(spot)
+				if build_type == "door" and _side_of(spot) != "" and spot != door_cell and not furniture.has(spot):
+					draw_colored_polygon(tile, Color(1.0, 0.85, 0.3, 0.3))
+				draw_polyline(tile + PackedVector2Array([tile[0]]), Color(0.35, 0.2, 0.08, 0.55), 1.5)
+		draw_colored_polygon(_diamond(door_cell), Color(1, 0.2, 0.2, 0.25))
 
-	# Walls and door. The doormat sticks out through the wall.
-	draw_rect(Rect2(Vector2.ZERO, floor_size), Color(0.2, 0.12, 0.07), false, 8.0)
-	var door_rect := Rect2(Vector2(door_cell) * CELL_SIZE, Vector2(CELL_SIZE, CELL_SIZE))
-	match door_side:
-		"bottom": door_rect = Rect2(door_rect.position.x, floor_size.y - 4, CELL_SIZE, 60)
-		"top": door_rect = Rect2(door_rect.position.x, -56, CELL_SIZE, 60)
-		"left": door_rect = Rect2(-56, door_rect.position.y, 60, CELL_SIZE)
-		"right": door_rect = Rect2(floor_size.x - 4, door_rect.position.y, 60, CELL_SIZE)
-	draw_rect(door_rect, Color(0.45, 0.3, 0.15))
 
-	# Furniture.
-	for cell in furniture:
-		var type: String = furniture[cell]
-		var rect := Rect2(Vector2(cell) * CELL_SIZE + Vector2(8, 8), Vector2(CELL_SIZE - 16, CELL_SIZE - 16))
-		draw_rect(rect, GameManager.FURNITURE[type]["color"])
-		draw_string(font, rect.position + Vector2(0, 20), GameManager.FURNITURE[type]["name"],
-				HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 16, Color.WHITE)
+func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, door: bool, window: bool) -> void:
+	var up := Vector2(0, -WALL_HEIGHT)
+	draw_colored_polygon(PackedVector2Array([from, to, to + up, from + up]), plaster)
+	var panel_up: Vector2 = up * 0.38                       # wood panelling along the bottom
+	draw_colored_polygon(PackedVector2Array([from, to, to + panel_up, from + panel_up]), panel)
+	draw_line(from + up, to + up, TRIM, 4.0)                # top trim
+	draw_line(from + panel_up, to + panel_up, TRIM, 2.0)
+	var along: Vector2 = to - from
+	if door:
+		# A wooden door in the wall.
+		var a: Vector2 = from + along * 0.2
+		var b: Vector2 = from + along * 0.8
+		var door_up: Vector2 = up * 0.78
+		draw_colored_polygon(PackedVector2Array([a, b, b + door_up, a + door_up]), Color8(120, 74, 40))
+		draw_polyline(PackedVector2Array([a, a + door_up, b + door_up, b]), TRIM, 2.0)
+		draw_circle(a + along * 0.5 + door_up * 0.45, 2.0, Color8(230, 190, 80))
+	elif window:
+		var a: Vector2 = from + along * 0.22 + up * 0.5
+		var b: Vector2 = from + along * 0.78 + up * 0.5
+		var win_up: Vector2 = up * 0.36
+		draw_colored_polygon(PackedVector2Array([a, b, b + win_up, a + win_up]), Color8(175, 214, 236))
+		draw_polyline(PackedVector2Array([a, b, b + win_up, a + win_up, a]), TRIM, 2.0)
+		draw_line((a + b) / 2.0, (a + b) / 2.0 + win_up, TRIM, 2.0)
 
-		if type != "kitchen":
-			continue
-		var h: Dictionary = hearths[cell]
-		if not is_instance_valid(h["cook"]):
-			draw_string(font, rect.position + Vector2(0, 42), "No cook",
-					HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 15, Color(1.0, 0.7, 0.7))
 
-		# Cooking progress bar on busy Hearths.
-		if not h["job"].is_empty():
-			var job: Dictionary = h["job"]
-			var done: float = 1.0 - job["time_left"] / job["total"]
-			var bar := Rect2(rect.position + Vector2(4, rect.size.y - 14), Vector2(rect.size.x - 8, 8))
-			draw_rect(bar, Color(0.1, 0.1, 0.1))
-			draw_rect(Rect2(bar.position, Vector2(bar.size.x * done, bar.size.y)), Color(1.0, 0.75, 0.2))
+# Draws one FloorProp, in the prop's own space (its position is 0, 0).
+func draw_prop(prop: FloorProp) -> void:
+	match prop.kind:
+		"table": _draw_table(prop)
+		"kitchen": _draw_hearth(prop)
+		"wall": _draw_front_wall(prop)
 
-		# A finished plate waiting for a waiter.
-		if is_instance_valid(h["plate_for"]):
-			draw_circle(rect.get_center() + Vector2(0, 8), 11.0, Color.WHITE)
-			draw_circle(rect.get_center() + Vector2(0, 8), 7.0, Color(0.85, 0.55, 0.2))
+
+# A box sitting on the middle of a square: `inset` is its size compared
+# to the square, `height` how tall it is, starting `from_height` above
+# the floor. Returns the middle of its top face.
+func _draw_block(prop: FloorProp, inset: float, height: float, top: Color, left: Color, right: Color, from_height: float = 0.0) -> Vector2:
+	var hw: float = TILE_W / 2.0 * inset
+	var hh: float = TILE_H / 2.0 * inset
+	var lift := Vector2(0, -height)
+	var base := Vector2(0, -from_height)
+	var n := Vector2(0, -hh)
+	var e := Vector2(hw, 0)
+	var s := Vector2(0, hh)
+	var w := Vector2(-hw, 0)
+	prop.draw_colored_polygon(PackedVector2Array([w + base, s + base, s + lift, w + lift]), left)
+	prop.draw_colored_polygon(PackedVector2Array([s + base, e + base, e + lift, s + lift]), right)
+	prop.draw_colored_polygon(PackedVector2Array([n + lift, e + lift, s + lift, w + lift]), top)
+	return lift
+
+
+func _draw_table(prop: FloorProp) -> void:
+	# Three visible legs, then the tabletop resting on them.
+	var leg := Color8(95, 60, 34)
+	var hw: float = TILE_W / 2.0 * 0.55
+	var hh: float = TILE_H / 2.0 * 0.55
+	for corner in [Vector2(-hw, 0), Vector2(0, hh), Vector2(hw, 0)]:
+		prop.draw_line(corner, corner + Vector2(0, -14), leg, 3.0)
+	_draw_block(prop, 0.62, 20.0, Color8(176, 116, 64), Color8(140, 90, 48), Color8(120, 76, 40), 14.0)
+
+
+func _draw_hearth(prop: FloorProp) -> void:
+	var font: Font = ThemeDB.fallback_font
+	var top: Vector2 = _draw_block(prop, 0.8, 34.0, Color8(70, 62, 60), Color8(165, 72, 52), Color8(135, 56, 42))
+	var h: Dictionary = hearths[prop.cell]
+	var cooking: bool = not h["job"].is_empty()
+	# The fire flickers while something is cooking.
+	var flicker: float = 1.0 + 0.15 * sin(Time.get_ticks_msec() / 90.0) if cooking else 0.8
+	prop.draw_circle(top, 10.0 * flicker, Color8(235, 120, 40))
+	prop.draw_circle(top, 5.0 * flicker, Color8(255, 210, 90))
+	if is_instance_valid(h["plate_for"]):
+		prop.draw_circle(top + Vector2(14, 2), 7.0, Color.WHITE)
+		prop.draw_circle(top + Vector2(14, 2), 4.0, Color8(190, 110, 50))
+	if cooking:
+		var job: Dictionary = h["job"]
+		var done: float = 1.0 - job["time_left"] / job["total"]
+		var bar := Rect2(top + Vector2(-24, -30), Vector2(48, 7))
+		prop.draw_rect(bar, Color(0.1, 0.1, 0.1))
+		prop.draw_rect(Rect2(bar.position, Vector2(bar.size.x * done, bar.size.y)), Color(1.0, 0.75, 0.2))
+	if not is_instance_valid(h["cook"]):
+		prop.draw_string(font, top + Vector2(-40, -26), "No cook",
+				HORIZONTAL_ALIGNMENT_CENTER, 80, 15, Color(1.0, 0.75, 0.75))
+
+
+func _draw_front_wall(prop: FloorProp) -> void:
+	# The prop sits at its square's bottom corner. The bottom edge runs to
+	# the square's left corner, the right edge to its right corner.
+	var up := Vector2(0, -LOW_WALL_HEIGHT)
+	var corners := {"bottom": Vector2(-TILE_W / 2.0, -TILE_H / 2.0), "right": Vector2(TILE_W / 2.0, -TILE_H / 2.0)}
+	for edge in prop.edges:
+		var far: Vector2 = corners[edge]
+		var face: Color = Color8(178, 118, 70) if edge == "bottom" else Color8(156, 102, 60)
+		prop.draw_colored_polygon(PackedVector2Array([far, Vector2.ZERO, up, far + up]), face)
+		prop.draw_line(far + up, up, Color8(210, 160, 105), 3.0)   # the lighter top rail

@@ -49,6 +49,8 @@ var _regular_came_today: bool = false
 
 
 func _ready() -> void:
+	# The street around the tavern.
+	RenderingServer.set_default_clear_color(Color8(120, 128, 112))
 	hud.build_selected.connect(_on_build_selected)
 	hud.day_start_requested.connect(_on_day_start_requested)
 	hud.hire_requested.connect(_on_hire_requested)

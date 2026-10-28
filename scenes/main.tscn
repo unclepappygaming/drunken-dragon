@@ -6,11 +6,16 @@
 [ext_resource type="Script" path="res://scripts/tavern_camera.gd" id="4_cam"]
 
 [node name="Main" type="Node2D"]
+y_sort_enabled = true
 script = ExtResource("1_main")
 
 [node name="TavernGrid" type="Node2D" parent="."]
-position = Vector2(40, 175)
+z_index = -1
+position = Vector2(400, 230)
 script = ExtResource("2_grid")
+
+[node name="Props" type="Node2D" parent="."]
+y_sort_enabled = true
 
 [node name="Customers" type="Node2D" parent="."]
 y_sort_enabled = true
