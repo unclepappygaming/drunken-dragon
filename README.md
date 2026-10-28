@@ -27,13 +27,13 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
     learning recipes, expanding, a triumphant banquet.
   - **Banquets** (below).
 - Fame earns **ranks**: Unknown, Local Haunt (10), Town Favorite (25), Talk
-  of the Realm (45), Famed Hall (70), Legendary (100). More fame also brings
+  of the Realm (55), Famed Hall (90), Legendary (140). More fame also brings
   guests faster, so keep building to keep the reviews good.
 - More fame brings guests faster. At 25 fame you can host **Noble Banquets**
   (tap Open Day, then Host a Banquet, 150g, once every 3 days). A party of
   nobles (gold crowns) arrives between 12:00 and 15:00. They skip the line,
   only order "Nobles only" dishes and tip 50%. If they all leave happy it's
-  a triumph (+5 fame); at least half is +2; fewer than half is -2.
+  a triumph (+3 fame); at least half is +1; fewer than half is -2.
 - **Recipes can't be bought.** Happy patrons share ideas, and quests (like
   "serve 12 Mushroom Stews") teach you new dishes. The recipe book shows
   every quest and your progress.

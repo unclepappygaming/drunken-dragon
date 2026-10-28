@@ -121,7 +121,7 @@ const REVIEWS: Array = [
 const REVIEW_MIN_SERVED: int = 8
 
 # Banquet result: everyone happy / at least half / fewer than half.
-const BANQUET_FAME: Dictionary = {"triumph": 5, "good": 2, "poor": -2}
+const BANQUET_FAME: Dictionary = {"triumph": 3, "good": 1, "poor": -2}
 
 # Each one awards fame once, the first time `stat` reaches `goal`.
 const MILESTONES: Array = [
@@ -143,9 +143,9 @@ const RANKS: Array = [
 	[0, "Unknown"],
 	[10, "Local Haunt"],
 	[25, "Town Favorite"],
-	[45, "Talk of the Realm"],
-	[70, "Famed Hall"],
-	[100, "Legendary"],
+	[55, "Talk of the Realm"],
+	[90, "Famed Hall"],
+	[140, "Legendary"],
 ]
 
 # Making the tavern bigger, one step at a time. Each step's quest has to
