@@ -28,6 +28,7 @@ const MAX_STAFF: int = 6   # per role
 @onready var staff_node: Node2D = $Staff
 @onready var spawn_timer: Timer = $SpawnTimer
 @onready var hud: TavernHUD = $HUD
+@onready var camera: TavernCamera = $Camera
 
 var _waiting_for_last_guests: bool = false
 
@@ -39,6 +40,8 @@ func _ready() -> void:
 	hud.new_game_requested.connect(_on_new_game_requested)
 	# You can connect a signal straight to another node's function.
 	grid.build_message.connect(hud.show_message)
+	camera.tapped.connect(grid.handle_tap)
+	camera.bounds = grid.floor_rect()
 	spawn_timer.timeout.connect(_on_spawn_timer_timeout)
 	GameManager.shop_closed.connect(_on_shop_closed)
 	# Building or selling between days changes the save, so save again.
@@ -51,7 +54,7 @@ func _ready() -> void:
 		_hire("cook")
 		_hire("waiter")
 		hud.show_summary(
-			"Welcome to\nThe Drunken Dragon!\n\nGuests sit at Tables. Waiters take orders and carry food; Cooks work the Hearths. Staff get paid every night.\n\nLearn new dishes in Menu & Recipes.",
+			"Welcome to\nThe Drunken Dragon!\n\nGuests sit at Tables. Waiters take orders and carry food; Cooks work the Hearths. Staff get paid every night.\n\nDrag to look around and pinch to zoom.",
 			"Open Day 1")
 	else:
 		grid.load_layout(save.get("furniture", []))

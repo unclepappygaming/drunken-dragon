@@ -8,7 +8,8 @@ start visiting, but they only eat the fancy dishes.
 
 ## How to play
 
-Each day runs from 09:00 to 21:00 (about two real minutes).
+Each day runs from 09:00 to 21:00 (about two real minutes). Drag with one
+finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 
 - **Guests** come in, sit beside a free Table and call for a waiter. If no
   table is free, they leave and you lose fame.
@@ -55,11 +56,27 @@ All art is placeholder shapes drawn in code, so the scripts are the whole game:
 | `scripts/customer.gd` | One guest's state machine |
 | `scripts/cook.gd` / `waiter.gd` | Staff behavior |
 | `scripts/hud.gd` | All the on-screen UI, built in code |
+| `scripts/tavern_camera.gd` | Drag, pinch and wheel camera; turns taps into build clicks |
 
-## Milestones
+## Roadmap
 
-1. ✅ Tavern grid, guests, hearths, day cycle
-2. ✅ Staff, pathfinding, saving
-3. ✅ Recipes, daily menu, nobles
-4. ⬜ UI moved into editable scenes
-5. ⬜ Art and sound
+1. ✅ **Tavern grid, guests, hearths, day cycle**
+2. ✅ **Staff, pathfinding, saving**
+3. ✅ **Recipes, daily menu, nobles**, plus a camera: drag to look around,
+   pinch (or mouse wheel) to zoom
+4. ⬜ **Balance pass**
+   - Busy-hour rushes so a well-staffed tavern still feels stretched
+   - Slow down fame growth from nobles (it can jump 30 → 80 in two days)
+   - Tune prices, cook times, patience and wages against real play
+5. ⬜ **Bigger tavern**
+   - Buy floor expansions (extra rows and columns) up to a maximum size
+   - Move the front door to any wall, with the same "nothing gets blocked" check
+   - The grid size and door position are saved; older saves load as the
+     original 8×10 floor with the door at the bottom
+   - The camera keeps a larger floor reachable on a phone screen
+6. ⬜ **Art and sound**
+   - Sprites for guests, nobles, staff, furniture and floor (sized to the
+     final square size and zoom)
+   - Sound effects and music (they start after the first tap, as browsers require)
+7. ⬜ **UI moved into editable scenes**, so menus can be restyled in the
+   Godot editor

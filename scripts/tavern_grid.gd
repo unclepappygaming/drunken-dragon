@@ -64,18 +64,20 @@ func _ready() -> void:
 	_place(Vector2i(6, 6), "kitchen")
 
 
-# _unhandled_input gets taps that the HUD buttons didn't already use.
-# Godot turns phone touches into mouse clicks by default, so checking
-# for a left mouse click works on both PC and phone.
-func _unhandled_input(event: InputEvent) -> void:
+# The camera tells us about taps (drags just move the view), already
+# converted to a point in the world, so zooming doesn't change which
+# square you hit.
+func handle_tap(world_pos: Vector2) -> void:
 	if build_type == "":
 		return
-	if event is InputEventMouseButton and event.pressed \
-			and event.button_index == MOUSE_BUTTON_LEFT:
-		var cell: Vector2i = _cell_at(to_local(event.position))
-		if cell != NO_CELL:
-			_try_build(cell)
-			get_viewport().set_input_as_handled()   # nobody else needs this tap
+	var cell: Vector2i = cell_at_world(world_pos)
+	if cell != NO_CELL:
+		_try_build(cell)
+
+
+# The floor plus the doorstep, in Main's space. The camera stays over it.
+func floor_rect() -> Rect2:
+	return Rect2(position, Vector2(COLS * CELL_SIZE, ROWS * CELL_SIZE + 60))
 
 
 func _process(delta: float) -> void:
