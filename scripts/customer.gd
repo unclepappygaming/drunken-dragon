@@ -11,15 +11,17 @@
 # IN_LINE: no table was free, so they wait outside the door until
 # main.gd gives them one with take_table().
 #
-# Nobles (is_noble) only order fancy tier 3 dishes. Anyone who finds
-# nothing they like on today's menu leaves unhappy.
+# Each guest has a type (guest_type, see guest_types.gd) that changes
+# their patience, speed, what they order and what they pay. Anyone who
+# finds nothing they like on today's menu leaves unhappy. Adventurers
+# come as a party sharing one table; if one storms off, they all go.
 #
 # Guests sit on a free square NEXT TO their table. A Waiter comes to
 # take the order, a Cook cooks it, and a Waiter carries it over.
 # Walking around furniture comes from walker.gd (see "extends Walker").
 #
-# Art is placeholder shapes drawn with _draw(); the art pass swaps these
-# for sprites later.
+# Each guest is drawn from their type's pixel-art sheet, recolored with
+# their own skin and hair (see guest_types.gd).
 # =====================================================================
 
 # class_name registers "Customer" as a type the whole project knows.
@@ -45,7 +47,10 @@ const EAT_TIME: float = 4.0
 var state: State = State.WALKING_IN
 var table_cell: Vector2i = TavernGrid.NO_CELL   # their table (none while in line)
 var order: Dictionary = {}           # one entry from GameManager.RECIPES
+var guest_type: String = "farmer"
 var is_noble: bool = false
+# Adventurers: everyone in the party, this guest included (shared Array).
+var party: Array = []
 var patience: float = MAX_PATIENCE
 # Why they left: "served", "impatient", "no_dish", "gave_up_line" or "closed".
 var leave_reason: String = ""
@@ -56,18 +61,25 @@ var _patience_max: float = MAX_PATIENCE   # what the patience bar counts down fr
 var price_bonus: float = 0.0
 var _timer: float = 0.0
 var _bubble: String = ""             # text shown above their head
-var _color: Color
+var _patience_scale: float = 1.0     # from the guest type
+var _patience_at_serve: float = 0.0  # for the Town Guard's quick-service tip
 
 
 # Called by main.gd right after the guest is created. We can't pass
 # arguments to instantiate(), so a setup() function is the usual pattern.
 # Then main.gd either seats them (take_table) or lines them up (wait_in_line).
-func setup(tavern_grid: TavernGrid, noble: bool = false) -> void:
+func setup(tavern_grid: TavernGrid, type: String = "farmer") -> void:
 	_setup_walker(tavern_grid, tavern_grid.door_position())
-	speed = WALK_SPEED
-	is_noble = noble
-	# Nobles wear royal purple; everyone else gets a random shirt color.
-	_color = Color(0.5, 0.25, 0.7) if noble else Color.from_hsv(randf(), 0.45, 0.95)
+	guest_type = type
+	is_noble = type == "noble"
+	var info: Dictionary = GuestTypes.TYPES[type]
+	speed = WALK_SPEED * info["speed"]
+	_patience_scale = info["patience"]
+	# A random look for their type, recolored with their own skin and hair.
+	var look: Dictionary = GuestTypes.random_look(type)
+	sprite_sheet = GuestTypes.SHEETS[look["sheet"]]
+	material = GuestTypes.material_for(type, look)
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
 	# GROUPS are tags. Putting every guest in "customers" lets main.gd ask
 	# "how many guests are still here?" with one line, without keeping
@@ -79,16 +91,16 @@ func take_table(cell: Vector2i) -> void:
 	table_cell = cell
 	state = State.WALKING_IN
 	_bubble = ""
-	patience = MAX_PATIENCE
-	_patience_max = MAX_PATIENCE
+	patience = MAX_PATIENCE * _patience_scale
+	_patience_max = patience
 	# Sit on a free square beside the table, not on top of it.
 	go_to_cell(grid.access_cell(cell, position, self))
 
 
 func wait_in_line(spot: Vector2) -> void:
 	state = State.IN_LINE
-	patience = LINE_PATIENCE
-	_patience_max = LINE_PATIENCE
+	patience = LINE_PATIENCE * _patience_scale
+	_patience_max = patience
 	go_to_outside_spot(spot)
 
 
@@ -135,9 +147,9 @@ func _process(delta: float) -> void:
 		State.DECIDING:
 			_timer -= delta
 			if _timer <= 0.0:
-				order = GameManager.pick_order(is_noble)
+				order = GameManager.pick_order(guest_type)
 				if order.is_empty():
-					_bubble = "Nothing fancy enough!" if is_noble else "Nothing I like!"
+					_bubble = _nothing_to_order_line()
 					_start_leaving("no_dish")
 					return
 				_bubble = "Waiter!"
@@ -155,9 +167,12 @@ func _process(delta: float) -> void:
 		State.EATING:
 			_timer -= delta
 			if _timer <= 0.0:
-				var share: float = 1.0 + price_bonus
+				var share: float = 1.0 + price_bonus + GuestTypes.TYPES[guest_type]["pay"]
 				if is_noble:
 					share += GameManager.NOBLE_TIP   # nobles tip well
+				# A guard served quickly is grateful.
+				if guest_type == "guard" and _patience_at_serve > _patience_max / 2.0:
+					share += GuestTypes.GUARD_TIP
 				var price: int = roundi(order["price"] * share)
 				GameManager.earn(price)
 				_bubble = "+%dg" % price
@@ -189,8 +204,17 @@ func serve_food() -> bool:
 		return false
 	state = State.EATING
 	_timer = EAT_TIME
+	_patience_at_serve = patience
 	_bubble = "Yum!"
 	return true
+
+
+func _nothing_to_order_line() -> String:
+	match guest_type:
+		"noble": return "Nothing fancy enough!"
+		"merchant": return "Nothing worth my coin!"
+		"regular": return "No %s today?" % GameManager.RECIPES[GameManager.regular_favorite()]["name"]
+	return "Nothing I like!"
 
 
 func _start_leaving(reason: String) -> void:
@@ -201,19 +225,21 @@ func _start_leaving(reason: String) -> void:
 	GameManager.order_requests.erase(self)
 	GameManager.order_queue.erase(self)
 	left_tavern.emit(self, reason == "served")
+	# An adventuring party sticks together: if one storms off, so does
+	# everyone still waiting.
+	if reason == "impatient":
+		for friend in party:
+			if friend != self and is_instance_valid(friend) and friend.state in [
+					State.WALKING_IN, State.DECIDING, State.WAITING_FOR_WAITER, State.WAITING_FOR_FOOD]:
+				friend.say("We're leaving!")
+				friend._start_leaving("impatient")
 
 
-# _draw() paints this node using simple shapes. (0, 0) is the guest's
-# own position, so everything is drawn relative to them.
+# _draw() paints this node. (0, 0) is the guest's own position, so
+# everything is drawn relative to them: the sprite, then the patience
+# bar under their feet and the speech bubble above their head.
 func _draw() -> void:
-	draw_circle(Vector2(0, 0), 18.0, _color)                    # body
-	draw_circle(Vector2(0, -26), 11.0, Color(1.0, 0.85, 0.7))   # head
-	if is_noble:
-		# A gold crown: a polygon is a shape drawn from a list of corners.
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(-10, -34), Vector2(10, -34), Vector2(10, -45), Vector2(5, -39),
-			Vector2(0, -47), Vector2(-5, -39), Vector2(-10, -45),
-		]), Color(1.0, 0.8, 0.2))
+	draw_sprite()
 
 	if state in [State.IN_LINE, State.WAITING_FOR_WAITER, State.WAITING_FOR_FOOD]:
 		var ratio: float = patience / _patience_max
@@ -222,6 +248,6 @@ func _draw() -> void:
 		draw_rect(Rect2(-25, 22, 50 * ratio, 7), Color(1.0 - ratio, ratio, 0.2))
 
 	if _bubble != "":
-		draw_rect(Rect2(-90, -72, 180, 28), Color(0, 0, 0, 0.65))
-		draw_string(ThemeDB.fallback_font, Vector2(-90, -51), _bubble,
+		draw_rect(Rect2(-90, -96, 180, 28), Color(0, 0, 0, 0.65))
+		draw_string(ThemeDB.fallback_font, Vector2(-90, -75), _bubble,
 				HORIZONTAL_ALIGNMENT_CENTER, 180, 19, Color.WHITE)

@@ -2,7 +2,8 @@
 # main.gd  —  the "director". Attached to the root Main node.
 #
 # It doesn't do much itself; it wires the other pieces together:
-#   * spawns guests on a timer, seating them or lining them up outside
+#   * spawns guests on a timer (which type: see guest_types.gd), seating
+#     them or lining them up outside; adventurers come as a party
 #   * moves the waiting line along whenever a table frees up
 #   * hires and lets go of staff (only between days)
 #   * tells the grid which build tool the HUD selected
@@ -41,6 +42,10 @@ var _waiting_for_last_guests: bool = false
 var _line: Array[Customer] = []
 # On a banquet day: when each noble arrives, in game minutes after opening.
 var _noble_arrivals: Array[float] = []
+# How many guests are using each table (a party shares one). The table
+# is freed when the last of them leaves.
+var _table_guests: Dictionary = {}
+var _regular_came_today: bool = false
 
 
 func _ready() -> void:
@@ -120,6 +125,7 @@ func _on_day_start_requested(banquet: bool) -> void:
 			hud.show_message(blocker if blocker != "" else "Not enough gold!")
 			return
 	GameManager.open_shop(banquet)
+	_regular_came_today = false
 	hud.set_day_button("Open", false)
 	spawn_timer.start(2.0)   # first guest arrives 2 seconds after opening
 	_noble_arrivals.clear()
@@ -141,14 +147,20 @@ func _on_build_selected(type: String) -> void:
 # Guests and the waiting line
 # ---------------------------------------------------------------------
 func _on_spawn_timer_timeout() -> void:
-	var noble: bool = false   # nobles only come to banquets
+	# Nobles only come to banquets, so they're never picked here.
+	var type: String = GuestTypes.pick_arrival(GameManager.fame, not _regular_came_today)
 	var cell: Vector2i = grid.find_free_table()
 	# Nobody jumps the line: a free table goes to the line first.
 	if cell != TavernGrid.NO_CELL and _line.is_empty():
-		var customer: Customer = _spawn_customer(noble)
-		_seat(customer, cell)
+		if type == "adventurer":
+			_seat_party(cell)
+		else:
+			_seat(_spawn_customer(type), cell)
 	elif _line.size() < MAX_LINE:
-		var customer: Customer = _spawn_customer(noble)
+		# A party won't queue; one of them comes in alone instead.
+		if type == "adventurer":
+			type = "farmer"
+		var customer: Customer = _spawn_customer(type)
 		_line.append(customer)
 		customer.wait_in_line(_line_spot(_line.size() - 1))
 	else:
@@ -160,19 +172,36 @@ func _on_spawn_timer_timeout() -> void:
 	spawn_timer.start(GameManager.get_spawn_interval())
 
 
-func _spawn_customer(noble: bool) -> Customer:
+func _spawn_customer(type: String) -> Customer:
 	# instantiate() creates a brand-new guest from the blueprint...
 	var customer: Customer = CUSTOMER_SCENE.instantiate()
 	# ...but it isn't in the game until it's added to the scene tree.
 	customers_node.add_child(customer)
-	customer.setup(grid, noble)
+	customer.setup(grid, type)
 	customer.left_tavern.connect(_on_customer_left)
+	if type == "regular":
+		_regular_came_today = true
 	return customer
 
 
 func _seat(customer: Customer, cell: Vector2i) -> void:
 	grid.reserve_table(cell, customer)
+	_table_guests[cell] = _table_guests.get(cell, 0) + 1
 	customer.take_table(cell)
+
+
+# Two or three adventurers sharing one table. They all hold the same
+# `party` list, so if one storms off the rest follow.
+func _seat_party(cell: Vector2i) -> void:
+	var members: Array = []
+	for i in randi_range(2, 3):
+		var adventurer: Customer = _spawn_customer("adventurer")
+		# Stagger them along the outside wall so they file in one by one.
+		adventurer.position += grid.line_direction() * (i * 26.0)
+		adventurer.party = members
+		members.append(adventurer)
+		_seat(adventurer, cell)
+	hud.show_message("An adventuring party of %d walks in!" % members.size())
 
 
 # An invited noble. Nobles don't queue: they get the next free table,
@@ -181,7 +210,7 @@ func _noble_arrives() -> void:
 	if GameManager.today_banquet_nobles == 0:
 		hud.show_message("The nobles are arriving!", 3.0)
 	GameManager.today_banquet_nobles += 1
-	var noble: Customer = _spawn_customer(true)
+	var noble: Customer = _spawn_customer("noble")
 	var cell: Vector2i = grid.find_free_table()
 	if cell != TavernGrid.NO_CELL:
 		_seat(noble, cell)
@@ -208,7 +237,12 @@ func _seat_from_line() -> void:
 
 
 func _on_customer_left(customer: Customer, _happy: bool) -> void:
-	grid.release_table(customer.table_cell)
+	var cell: Vector2i = customer.table_cell
+	if _table_guests.has(cell):
+		_table_guests[cell] -= 1
+		if _table_guests[cell] <= 0:
+			_table_guests.erase(cell)
+			grid.release_table(cell)
 	_line.erase(customer)
 
 	# Single guests don't change fame; they all count toward tonight's

@@ -15,6 +15,16 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
   table is free, they wait in a **line outside the door** (up to 5) and take
   the next table that frees up. If they wait too long, or the line is full,
   they leave and you lose fame.
+- **Guests come in different types**, each with their own look and habits:
+
+  | Guest | Habits |
+  | --- | --- |
+  | Farmer | The everyday guest; orders any common dish |
+  | Town Guard | In a hurry (60% patience), wants Dragon Ale, tips 30% if served quickly |
+  | Merchant | Patient, only orders tier 2 dishes, pays 20% more |
+  | Old Regular | Walks slowly, comes once a day, always orders the same favorite dish |
+  | Adventurers | From 10 fame: a party of 2-3 sharing one table. Tip 25%, but if one storms off they all leave |
+  | Lord / Lady | Only at Noble Banquets |
 - **Waiters** take orders, fetch finished dishes from a Hearth and carry them
   to the table.
 - **Cooks** work the Hearths. A Hearth only cooks while a cook stands at it.
@@ -94,8 +104,9 @@ All art is placeholder shapes drawn in code, so the scripts are the whole game:
 | `scripts/hud.gd` | All the on-screen UI, built in code |
 | `scripts/tavern_camera.gd` | Drag, pinch and wheel camera; turns taps into build clicks |
 | `scripts/staff_profiles.gd` | Staff types, traits, wages, names and looks |
+| `scripts/guest_types.gd` | Guest types, how often they come, and their looks |
 | `shaders/palette_swap.gdshader` | Gives each staff member their own skin and hair color |
-| `tools/sprites/make_sprites.py` | Draws the pixel-art staff sprite sheets (`python3 tools/sprites/make_sprites.py`) |
+| `tools/sprites/make_sprites.py` | Draws the pixel-art staff and guest sprite sheets (`python3 tools/sprites/make_sprites.py`) |
 
 ## Roadmap
 
@@ -120,7 +131,10 @@ All art is placeholder shapes drawn in code, so the scripts are the whole game:
 6. ⬜ **Art and sound**
    - ✅ Pixel-art staff: 3 cook and 3 waiter types, each with a trait,
      walk animations in 4 directions and per-person skin and hair colors
-   - ⬜ Sprites for guests, nobles, furniture and floor
+   - ✅ Guest types with pixel-art looks: Farmer, Town Guard, Merchant,
+     Old Regular, Adventurers (knight, mage, rogue), Lord and Lady
+   - ⬜ More guests (bard, elf, dwarf miner, wizard, food critic...)
+   - ⬜ Sprites for furniture and floor
    - Sound effects and music (they start after the first tap, as browsers require)
 7. ⬜ **UI moved into editable scenes**, so menus can be restyled in the
    Godot editor

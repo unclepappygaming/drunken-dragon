@@ -556,21 +556,45 @@ func toggle_menu(id: String) -> String:
 
 # Does today's menu have anything for this kind of guest?
 func menu_suits(noble: bool) -> bool:
-	return not pick_order(noble).is_empty()
+	return not pick_order("noble" if noble else "farmer").is_empty()
 
 
-# A guest chooses a dish from today's menu. Nobles only order tier 3
-# dishes; common folk only order tier 1-2. Empty if nothing suits them.
-func pick_order(noble: bool) -> Dictionary:
-	var choices: Array = []
+# A guest chooses a dish from today's menu, depending on their type
+# (see guest_types.gd). Empty if nothing suits them.
+#   noble       tier 3 only
+#   merchant    tier 2 only
+#   guard       Dragon Ale if it's on, otherwise anything common
+#   regular     their favorite dish, or nothing
+#   others      any tier 1-2 dish
+func pick_order(guest_type: String) -> Dictionary:
+	var choices: Array[String] = []
 	for id in menu:
-		var recipe: Dictionary = RECIPES[id]
-		if (recipe["tier"] == 3) == noble:
-			# Add the ID so the guest can report which dish they ate.
-			choices.append(recipe.merged({"id": id}))
+		var tier: int = RECIPES[id]["tier"]
+		match guest_type:
+			"noble":
+				if tier == 3: choices.append(id)
+			"merchant":
+				if tier == 2: choices.append(id)
+			"regular":
+				if id == regular_favorite(): choices.append(id)
+			_:
+				if tier < 3: choices.append(id)
+	if guest_type == "guard" and choices.has("ale"):
+		choices = ["ale"]
 	if choices.is_empty():
 		return {}
-	return choices.pick_random()
+	var pick: String = choices.pick_random()
+	# Add the ID so the guest can report which dish they ate.
+	return RECIPES[pick].merged({"id": pick})
+
+
+# The Old Regular's favorite: chosen on their first visit from the common
+# dishes you know, then remembered forever (it's saved with the stats).
+func regular_favorite() -> String:
+	if not stats.has("regular_favorite"):
+		var common: Array = known_recipes.filter(func(id): return RECIPES[id]["tier"] < 3)
+		stats["regular_favorite"] = common.pick_random()
+	return str(stats["regular_favorite"])
 
 
 # ---------------------------------------------------------------------
