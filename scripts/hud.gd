@@ -11,7 +11,8 @@
 #                Build or Staff is tapped, and hides again when done
 #   cards:       the day summary (closes with Continue, so you can build
 #                between days), the recipe book, the expansion card and
-#                the "plan the day" card for Noble Banquets
+#                the "plan the day" card for Noble Banquets, and the
+#                people card (today's job applicants, or your staff)
 #
 # The UI is built in code here so you don't have to click together
 # dozens of nodes in the editor. A later milestone moves it into a
@@ -22,7 +23,9 @@ extends CanvasLayer
 
 signal build_selected(type: String)     # "table", "kitchen", "remove" or ""
 signal day_start_requested(banquet: bool)
-signal staff_change_requested(role: String, change: int)   # "cook"/"waiter", +1 or -1
+signal hire_requested(role: String, index: int)   # index into GameManager.applicants(role)
+signal fire_requested(uid: int)
+signal staff_list_requested
 signal new_game_requested
 signal expand_requested
 
@@ -58,6 +61,11 @@ var _expand_panel: PanelContainer
 var _expand_label: Label
 var _expand_button: Button
 var _plan_panel: PanelContainer
+var _people_panel: PanelContainer
+var _people_title: Label
+var _people_list: VBoxContainer
+var _people_mode: String = ""      # "cook", "waiter" (applicants) or "staff"
+var _staff_shown: Array = []       # profiles for the "staff" mode
 var _plan_label: Label
 var _banquet_button: Button
 
@@ -77,6 +85,7 @@ func _ready() -> void:
 	_build_recipe_panel()
 	_build_expand_panel()
 	_build_plan_panel()
+	_build_people_panel()
 
 	# CONNECTING SIGNALS: "when GameManager emits gold_changed, run my
 	# _on_gold_changed function". The signal passes along the new amount.
@@ -139,6 +148,7 @@ func show_summary(text: String, allow_new_game: bool = false) -> void:
 	_new_game_button.text = "New Game"
 	_recipe_panel.visible = false
 	_expand_panel.visible = false
+	_people_panel.visible = false
 	_summary_panel.visible = true
 
 
@@ -191,7 +201,7 @@ func _set_tray(tray: String) -> void:
 	if tray == "build":
 		_set_hint("Pick something to build, then tap a square.")
 	elif tray == "staff":
-		_set_hint("Hire and fire staff between days.")
+		_set_hint("Hire and let staff go between days.")
 	else:
 		_set_hint("Drag to look around. Pinch to zoom.")
 
@@ -218,6 +228,7 @@ func _set_hint(text: String) -> void:
 
 
 func _on_day_button() -> void:
+	_people_panel.visible = false
 	_summary_panel.visible = false
 	_recipe_panel.visible = false
 	_expand_panel.visible = false
@@ -265,6 +276,7 @@ func _on_continue_button() -> void:
 
 func _on_recipes_button() -> void:
 	_set_tray("")
+	_people_panel.visible = false
 	_summary_panel.visible = false
 	_expand_panel.visible = false
 	_recipe_panel.visible = not _recipe_panel.visible
@@ -405,7 +417,7 @@ func _build_trays() -> void:
 	var done := _make_button("Done", 21, build_row, 86)
 	done.pressed.connect(_set_tray.bind(""))
 
-	# Staff tray. [button text, role, +1 hire / -1 let go]
+	# Staff tray: see today's applicants, or everyone you've hired.
 	var staff_panel := PanelContainer.new()
 	add_child(staff_panel)
 	_pin_bottom(staff_panel, BAR_HEIGHT, TRAY_HEIGHT)
@@ -413,16 +425,12 @@ func _build_trays() -> void:
 	_staff_tray = staff_panel
 	var staff_row := HBoxContainer.new()
 	staff_panel.add_child(staff_row)
-	var staff_buttons: Array = [
-		["Hire Cook\n%dg/day" % GameManager.STAFF["cook"]["wage"], "cook", 1],
-		["Fire\nCook", "cook", -1],
-		["Hire Waiter\n%dg/day" % GameManager.STAFF["waiter"]["wage"], "waiter", 1],
-		["Fire\nWaiter", "waiter", -1],
-	]
-	for entry in staff_buttons:
-		var button := _make_button(entry[0], 21, staff_row, 86)
-		# You can bind more than one argument.
-		button.pressed.connect(staff_change_requested.emit.bind(entry[1], entry[2]))
+	var hire_cook := _make_button("Hire\nCook", 22, staff_row, 86)
+	hire_cook.pressed.connect(_open_people.bind("cook"))
+	var hire_waiter := _make_button("Hire\nWaiter", 22, staff_row, 86)
+	hire_waiter.pressed.connect(_open_people.bind("waiter"))
+	var team := _make_button("Your\nStaff", 22, staff_row, 86)
+	team.pressed.connect(staff_list_requested.emit)
 
 	_build_tray.visible = false
 	_staff_tray.visible = false
@@ -671,3 +679,127 @@ func _add_goals() -> void:
 		progress.text = "Done" if done else "%d/%d" % [mini(GameManager.stat(milestone["stat"]), milestone["goal"]), milestone["goal"]]
 		progress.modulate = Color(0.6, 1.0, 0.6) if done else Color(1.0, 0.85, 0.5)
 		row.add_child(progress)
+
+
+# ---------------------------------------------------------------------
+# The people card: today's applicants for a job, or your current staff.
+# Each row shows the person's picture (recolored to their looks), their
+# type, wage and trait, and a Hire or Let go button.
+# ---------------------------------------------------------------------
+func show_staff_list(profiles: Array) -> void:
+	_staff_shown = profiles
+	_people_mode = "staff"
+	_show_people()
+
+
+func _open_people(role: String) -> void:
+	_people_mode = role
+	_show_people()
+
+
+func _show_people() -> void:
+	_summary_panel.visible = false
+	_recipe_panel.visible = false
+	_expand_panel.visible = false
+	_people_panel.visible = true
+	_refresh_people()
+
+
+func _on_hire_pressed(index: int) -> void:
+	hire_requested.emit(_people_mode, index)
+	_refresh_people()
+
+
+func _refresh_people() -> void:
+	if not _people_panel.visible:
+		return
+	for child in _people_list.get_children():
+		_people_list.remove_child(child)
+		child.queue_free()
+
+	var people: Array = _staff_shown if _people_mode == "staff" else GameManager.applicants(_people_mode)
+	if _people_mode == "staff":
+		_people_title.text = "Your Staff"
+	else:
+		_people_title.text = "Looking for work: %s" % ("Cooks" if _people_mode == "cook" else "Waiters")
+	if people.is_empty():
+		var none := _make_label(22)
+		none.text = "Nobody else is looking for work today. Come back tomorrow."
+		none.autowrap_mode = TextServer.AUTOWRAP_WORD
+		_people_list.add_child(none)
+
+	for i in people.size():
+		var profile: Dictionary = people[i]
+		var info: Dictionary = StaffProfiles.TYPES[profile["type"]]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		_people_list.add_child(row)
+
+		var picture := TextureRect.new()
+		picture.texture = StaffProfiles.portrait(profile)
+		picture.material = StaffProfiles.material_for(profile)
+		picture.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		picture.custom_minimum_size = Vector2(StaffProfiles.FRAME_SIZE) * 3.0
+		picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		row.add_child(picture)
+
+		var about := VBoxContainer.new()
+		about.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(about)
+		var name_label := _make_label(26)
+		name_label.text = profile["name"]
+		about.add_child(name_label)
+		var job := _make_label(20)
+		job.text = "%s  %dg/day" % [info["title"], info["wage"]]
+		job.modulate = Color(0.8, 0.8, 0.8)
+		about.add_child(job)
+		var trait_label := _make_label(20)
+		trait_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+		trait_label.text = "%s: %s" % [info["trait"], info["about"]]
+		trait_label.modulate = Color(1.0, 0.85, 0.5)
+		about.add_child(trait_label)
+
+		var button := Button.new()
+		button.add_theme_font_size_override("font_size", 22)
+		button.custom_minimum_size = Vector2(130, 76)
+		button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		if _people_mode == "staff":
+			button.text = "Let go"
+			button.pressed.connect(fire_requested.emit.bind(profile["uid"]))
+		else:
+			button.text = "Hire"
+			button.modulate = HIGHLIGHT
+			button.pressed.connect(_on_hire_pressed.bind(i))
+		row.add_child(button)
+
+
+func _build_people_panel() -> void:
+	_people_panel = PanelContainer.new()
+	add_child(_people_panel)
+	_people_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_people_panel.offset_left = 10
+	_people_panel.offset_right = -10
+	_people_panel.offset_top = TOP_HEIGHT + 5
+	_people_panel.offset_bottom = -(BAR_HEIGHT + TRAY_HEIGHT + 5)
+	_people_panel.visible = false
+	_solid(_people_panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 12)
+	_people_panel.add_child(vbox)
+	_people_title = _make_label(28)
+	_people_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_people_title)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vbox.add_child(scroll)
+	_people_list = VBoxContainer.new()
+	_people_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_people_list.add_theme_constant_override("separation", 16)
+	scroll.add_child(_people_list)
+
+	var close := _make_button("Close", 26, vbox, 76)
+	close.pressed.connect(func(): _people_panel.visible = false)

@@ -38,9 +38,9 @@ const STARTING_GOLD: int = 200
 const SAVE_PATH: String = "user://save.json"
 # Bump this if the save format ever changes, so old saves can be handled.
 # Version 2 added recipes and the menu, version 3 lifetime stats (for
-# quests), version 4 expansions and the door, version 5 fame milestones.
-# Older saves still load.
-const SAVE_VERSION: int = 5
+# quests), version 4 expansions and the door, version 5 fame milestones,
+# version 6 named staff with types and looks. Older saves still load.
+const SAVE_VERSION: int = 6
 
 # Everything the player can build. The key ("table") is the ID the
 # other scripts use; the inner Dictionary holds its details.
@@ -49,11 +49,9 @@ const FURNITURE: Dictionary = {
 	"kitchen": {"name": "Hearth", "cost": 120, "color": Color(0.7, 0.25, 0.15)},
 }
 
-# Staff you can hire. Wages are paid at the end of each day.
-const STAFF: Dictionary = {
-	"cook": {"name": "Cook", "wage": 25},
-	"waiter": {"name": "Waiter", "wage": 20},
-}
+# Staff types, traits and wages live in staff_profiles.gd. Each day a few
+# people apply for each job; you pick who to hire.
+const APPLICANTS_PER_ROLE: int = 3
 
 # Every dish the tavern could ever serve. The key ("ale") is the ID.
 #   tier 1-2: what common folk order
@@ -182,6 +180,11 @@ var stats: Dictionary = {}
 
 var expansions_built: int = 0
 
+# Today's job applicants: role ("cook"/"waiter") -> Array of profiles.
+# New faces every day.
+var _applicants: Dictionary = {}
+var _applicants_day: int = -1
+
 # Stats for the end-of-day summary (reset every morning).
 var today_income: int = 0
 var today_served: int = 0
@@ -281,6 +284,7 @@ func reset() -> void:
 	menu = STARTER_RECIPES.duplicate()
 	stats = {}
 	expansions_built = 0
+	_applicants_day = -1
 	order_requests.clear()
 	order_queue.clear()
 
@@ -292,10 +296,10 @@ func reset() -> void:
 # dishes or guests mid-walk to store.
 #
 # The save is a JSON text file, so you can open it and read it.
-# main.gd supplies the furniture, door and staff; we add gold, fame,
-# day, recipes, stats and expansions.
+# main.gd supplies the furniture, door and staff (a list of profiles);
+# we add gold, fame, day, recipes, stats and expansions.
 # ---------------------------------------------------------------------
-func save_game(layout: Array, door: Array, cooks: int, waiters: int) -> void:
+func save_game(layout: Array, door: Array, staff: Array) -> void:
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"day": day,
@@ -304,8 +308,7 @@ func save_game(layout: Array, door: Array, cooks: int, waiters: int) -> void:
 		"furniture": layout,
 		"door": door,
 		"expansions": expansions_built,
-		"cooks": cooks,
-		"waiters": waiters,
+		"staff": staff,
 		"recipes": known_recipes,
 		"menu": menu,
 		"stats": stats,
@@ -393,8 +396,43 @@ func pay_wages(amount: int) -> void:
 	gold_changed.emit(gold)
 
 
-func daily_wages(cooks: int, waiters: int) -> int:
-	return cooks * STAFF["cook"]["wage"] + waiters * STAFF["waiter"]["wage"]
+func daily_wages(staff: Array) -> int:
+	var total: int = 0
+	for profile in staff:
+		total += StaffProfiles.wage(profile)
+	return total
+
+
+# ---------------------------------------------------------------------
+# HIRING
+# ---------------------------------------------------------------------
+# Today's applicants for a role. A fresh set each day.
+func applicants(role: String) -> Array:
+	if _applicants_day != day:
+		_applicants_day = day
+		_applicants = {}
+		for job in ["cook", "waiter"]:
+			var people: Array = []
+			for i in APPLICANTS_PER_ROLE:
+				people.append(StaffProfiles.random_profile(job))
+			_applicants[job] = people
+	return _applicants[role]
+
+
+# Hires an applicant: they leave the list and get an ID of their own.
+func take_applicant(role: String, index: int) -> Dictionary:
+	var people: Array = applicants(role)
+	if index < 0 or index >= people.size():
+		return {}
+	var profile: Dictionary = people.pop_at(index)
+	profile["uid"] = new_staff_uid()
+	return profile
+
+
+# A number no other staff member has, so you can pick who to let go.
+func new_staff_uid() -> int:
+	add_stat("staff_uid")
+	return stat("staff_uid")
 
 
 # A Waiter asks for the next guest who wants to order (or null).

@@ -46,7 +46,9 @@ var _noble_arrivals: Array[float] = []
 func _ready() -> void:
 	hud.build_selected.connect(_on_build_selected)
 	hud.day_start_requested.connect(_on_day_start_requested)
-	hud.staff_change_requested.connect(_on_staff_change_requested)
+	hud.hire_requested.connect(_on_hire_requested)
+	hud.fire_requested.connect(_on_fire_requested)
+	hud.staff_list_requested.connect(_show_staff_list)
 	hud.new_game_requested.connect(_on_new_game_requested)
 	hud.expand_requested.connect(_on_expand_requested)
 	# You can connect a signal straight to another node's function.
@@ -63,8 +65,8 @@ func _ready() -> void:
 	var save: Dictionary = GameManager.load_game()
 	if save.is_empty():
 		# New game: one cook and one waiter. They walk in through the door.
-		_hire("cook")
-		_hire("waiter")
+		_hire(StaffProfiles.random_profile("cook"))
+		_hire(StaffProfiles.random_profile("waiter"))
 		hud.show_summary(
 			"Welcome to\nThe Drunken Dragon!\n\nGuests sit at Tables. Waiters take orders and carry food; Cooks work the Hearths. Staff get paid every night.\n\nHappy patrons share recipe ideas, and quests teach you more. See Recipes.\n\nDrag to look around and pinch to zoom.")
 	else:
@@ -76,10 +78,7 @@ func _ready() -> void:
 			grid.set_door(str(door[0]), int(door[1]))
 		grid.load_layout(save.get("furniture", []))
 		# clampi keeps a number within limits, in case the file was edited.
-		for i in clampi(int(save.get("cooks", 1)), 1, MAX_STAFF):
-			_hire("cook")
-		for i in clampi(int(save.get("waiters", 1)), 1, MAX_STAFF):
-			_hire("waiter")
+		_load_staff(save)
 		# Day 0 means they built or hired before ever opening.
 		var progress: String = "Day %d is done." % GameManager.day if GameManager.day > 0 \
 				else "Your tavern is ready for its first day."
@@ -298,43 +297,99 @@ func _on_shop_closed(_day: int) -> void:
 # ---------------------------------------------------------------------
 # Staff
 # ---------------------------------------------------------------------
-func _on_staff_change_requested(role: String, change: int) -> void:
-	# Changing staff mid-shift would leave orders half-done, so it's
-	# only allowed while the tavern is closed.
+# Changing staff mid-shift would leave orders half-done, so hiring and
+# letting people go only happen while the tavern is closed.
+func _staff_changes_allowed() -> bool:
 	if GameManager.is_open or _waiting_for_last_guests:
-		hud.show_message("Hire or fire staff after closing time.")
+		hud.show_message("Hire or let staff go after closing time.")
+		return false
+	return true
+
+
+# Hire one of today's applicants (index into GameManager.applicants).
+func _on_hire_requested(role: String, index: int) -> void:
+	if not _staff_changes_allowed():
 		return
-	var group: String = role + "s"   # "cooks" or "waiters"
-	var staff: Array[Node] = get_tree().get_nodes_in_group(group)
-	var info: Dictionary = GameManager.STAFF[role]
-	if change > 0:
-		if staff.size() >= MAX_STAFF:
-			hud.show_message("That's plenty of %ss!" % info["name"].to_lower())
-			return
-		_hire(role)
-		hud.show_message("Hired a %s (%dg/day)." % [info["name"], info["wage"]])
-	else:
-		# Without at least one of each, nobody could ever be served.
-		if staff.size() <= 1:
-			hud.show_message("You need at least one %s." % info["name"].to_lower())
-			return
-		staff.back().leave()   # the newest one walks out
-		hud.show_message("Let a %s go." % info["name"].to_lower())
+	if get_tree().get_nodes_in_group(role + "s").size() >= MAX_STAFF:
+		hud.show_message("That's plenty of %ss!" % role)
+		return
+	var profile: Dictionary = GameManager.take_applicant(role, index)
+	if profile.is_empty():
+		return
+	_hire(profile)
+	var info: Dictionary = StaffProfiles.TYPES[profile["type"]]
+	hud.show_message("Hired %s the %s (%dg/day)." % [profile["name"], info["title"], info["wage"]])
 	_update_staff_display()
 	_save_if_closed()
 
 
-func _hire(role: String) -> void:
+func _on_fire_requested(uid: int) -> void:
+	if not _staff_changes_allowed():
+		return
+	for person in _all_staff():
+		if person.profile["uid"] != uid:
+			continue
+		var role: String = StaffProfiles.role_of(person.profile)
+		# Without at least one of each, nobody could ever be served.
+		if get_tree().get_nodes_in_group(role + "s").size() <= 1:
+			hud.show_message("You need at least one %s." % role)
+			return
+		person.leave()
+		hud.show_message("%s has left the tavern." % person.profile["name"])
+		break
+	_update_staff_display()
+	_save_if_closed()
+	_show_staff_list()
+
+
+func _hire(profile: Dictionary) -> void:
+	if not profile.has("uid") or int(profile["uid"]) <= 0:
+		profile["uid"] = GameManager.new_staff_uid()
+	var role: String = StaffProfiles.role_of(profile)
 	var scene: PackedScene = COOK_SCENE if role == "cook" else WAITER_SCENE
 	var person: Walker = scene.instantiate()
 	staff_node.add_child(person)
-	person.setup(grid, grid.door_position())
+	person.setup(grid, grid.door_position(), profile)
+
+
+# Staff from the save file. Saves from before named staff only stored
+# how many of each there were, so those get random new faces.
+func _load_staff(save: Dictionary) -> void:
+	var saved = save.get("staff", null)
+	if typeof(saved) == TYPE_ARRAY:
+		for entry in saved:
+			for role in ["cook", "waiter"]:
+				var profile: Dictionary = StaffProfiles.clean(entry, role)
+				if not profile.is_empty() and get_tree().get_nodes_in_group(role + "s").size() < MAX_STAFF:
+					_hire(profile)
+	else:
+		for i in clampi(int(save.get("cooks", 1)), 1, MAX_STAFF):
+			_hire(StaffProfiles.random_profile("cook"))
+		for i in clampi(int(save.get("waiters", 1)), 1, MAX_STAFF):
+			_hire(StaffProfiles.random_profile("waiter"))
+	# Everyone needs at least one of each.
+	for role in ["cook", "waiter"]:
+		if get_tree().get_nodes_in_group(role + "s").is_empty():
+			_hire(StaffProfiles.random_profile(role))
+
+
+# Everyone on staff (not counting anyone already walking out).
+func _all_staff() -> Array:
+	return get_tree().get_nodes_in_group("cooks") + get_tree().get_nodes_in_group("waiters")
+
+
+func _staff_profiles() -> Array:
+	return _all_staff().map(func(person): return person.profile)
+
+
+func _show_staff_list() -> void:
+	hud.show_staff_list(_staff_profiles())
 
 
 func _update_staff_display() -> void:
 	var cooks: int = get_tree().get_nodes_in_group("cooks").size()
 	var waiters: int = get_tree().get_nodes_in_group("waiters").size()
-	hud.set_staff(cooks, waiters, GameManager.daily_wages(cooks, waiters))
+	hud.set_staff(cooks, waiters, GameManager.daily_wages(_staff_profiles()))
 
 
 # ---------------------------------------------------------------------
@@ -351,15 +406,11 @@ func _save_if_closed() -> void:
 	# Mid-day changes are saved at the end of the day instead.
 	if GameManager.is_open or _waiting_for_last_guests:
 		return
-	GameManager.save_game(grid.get_layout(), grid.get_door(),
-			get_tree().get_nodes_in_group("cooks").size(),
-			get_tree().get_nodes_in_group("waiters").size())
+	GameManager.save_game(grid.get_layout(), grid.get_door(), _staff_profiles())
 
 
 func _show_day_summary() -> void:
-	var wages: int = GameManager.daily_wages(
-			get_tree().get_nodes_in_group("cooks").size(),
-			get_tree().get_nodes_in_group("waiters").size())
+	var wages: int = GameManager.daily_wages(_staff_profiles())
 	GameManager.pay_wages(wages)
 	GameManager.finish_day()
 

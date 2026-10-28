@@ -190,8 +190,10 @@ func _process(delta: float) -> void:
 			if not _wants_food(job["customer"]):
 				h["job"] = {}
 				continue
-			job["time_left"] -= delta
+			# Some cooks are faster with some dishes (see cook.gd).
+			job["time_left"] -= delta * cook.cook_speed(job["customer"].order)
 			if job["time_left"] <= 0.0:
+				job["customer"].price_bonus += cook.portion_bonus()
 				h["plate_for"] = job["customer"]   # ready for a waiter
 				h["job"] = {}
 	queue_redraw()

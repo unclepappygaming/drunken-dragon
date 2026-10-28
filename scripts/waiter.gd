@@ -10,6 +10,11 @@
 # If the guest storms out halfway, the waiter gives up and goes back to
 # IDLE (any food they were carrying is wasted). LEAVING is used when
 # the player lets them go.
+#
+# Each waiter has a profile (see staff_profiles.gd). Traits:
+#   Smooth Talker (Barkeep): guests get extra patience when ordering
+#   Nimble (Serving Maid): walks faster
+#   Lucky (Halfling Server): some guests tip big, but walks slower
 # =====================================================================
 class_name Waiter
 extends Walker
@@ -18,17 +23,29 @@ enum State { IDLE, TO_GUEST, TAKING_ORDER, TO_HEARTH, CARRYING, LEAVING }
 
 const WALK_SPEED: float = 220.0
 const ORDER_TAKE_TIME: float = 1.0
+const SMOOTH_TALK_PATIENCE: float = 10.0
+const LUCKY_CHANCE: float = 1.0 / 3.0
+const LUCKY_TIP: float = 0.5
 
 var state: State = State.IDLE
 
 var _guest: Customer = null                 # who we're working for
 var _hearth: Vector2i = TavernGrid.NO_CELL  # where we're fetching food
 var _timer: float = 0.0
+var profile: Dictionary = {}
 
 
-func setup(tavern_grid: TavernGrid, start_pos: Vector2) -> void:
+func setup(tavern_grid: TavernGrid, start_pos: Vector2, who: Dictionary) -> void:
 	_setup_walker(tavern_grid, start_pos)
-	speed = WALK_SPEED
+	profile = who
+	match profile["type"]:
+		"maid": speed = WALK_SPEED * 1.25
+		"halfling": speed = WALK_SPEED * 0.9
+		_: speed = WALK_SPEED
+	sprite_sheet = StaffProfiles.SHEETS[profile["type"]]
+	material = StaffProfiles.material_for(profile)
+	# Pixel art stays crisp instead of blurry when scaled up.
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	add_to_group("waiters")
 
 
@@ -51,6 +68,8 @@ func _process(delta: float) -> void:
 				_timer -= delta
 				if _timer <= 0.0:
 					_guest.take_order()
+					if profile["type"] == "barkeep":
+						_guest.calm(SMOOTH_TALK_PATIENCE)
 					_guest = null
 					state = State.IDLE
 
@@ -72,7 +91,8 @@ func _process(delta: float) -> void:
 			if not _guest_is(Customer.State.WAITING_FOR_FOOD):
 				_give_up()   # they left; the plate is wasted
 			elif _walk(delta):
-				_guest.serve_food()
+				if _guest.serve_food() and profile["type"] == "halfling" and randf() < LUCKY_CHANCE:
+					_guest.add_tip(LUCKY_TIP, "Lucky me! Big tip!")
 				_guest = null
 				state = State.IDLE
 
@@ -119,9 +139,4 @@ func _guest_is(guest_state: Customer.State) -> bool:
 
 
 func _draw() -> void:
-	draw_circle(Vector2(0, 0), 18.0, Color(0.15, 0.3, 0.25))    # dark green vest
-	draw_rect(Rect2(-8, -4, 16, 20), Color(0.9, 0.9, 0.85))     # apron
-	draw_circle(Vector2(0, -26), 11.0, Color(1.0, 0.85, 0.7))   # head
-	if state == State.CARRYING:
-		draw_circle(Vector2(22, -6), 11.0, Color.WHITE)          # plate
-		draw_circle(Vector2(22, -6), 7.0, Color(0.85, 0.55, 0.2))  # food
+	draw_sprite(state == State.CARRYING)

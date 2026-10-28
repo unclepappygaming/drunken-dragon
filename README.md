@@ -46,8 +46,19 @@ The bottom bar has four buttons:
     days). The waiting line follows it.
   - **Expand** makes the floor bigger, up to 12 x 14. Each expansion is
     unlocked by a quest (like "Serve 60 guests"), then bought with gold.
-- **Staff** opens a tray to hire or fire cooks and waiters (between days
-  only). Wages are paid every night.
+- **Staff** opens a tray: **Hire Cook**, **Hire Waiter** (three new
+  applicants each day) and **Your Staff** (let someone go). Between days
+  only. Wages are paid every night. Every staff member has a name, their
+  own look, and a trait that comes with their type:
+
+  | Type | Trait | Wage |
+  | --- | --- | --- |
+  | Classic Chef | Trained: cooks every dish 25% faster | 30g |
+  | Tavern Cook | Hearty Portions: their dishes earn 15% more gold | 25g |
+  | Dwarf Cook | Roast Master: roasts cook 40% faster | 27g |
+  | Barkeep | Smooth Talker: +10s patience for guests they serve | 22g |
+  | Serving Maid | Nimble: walks 25% faster | 22g |
+  | Halfling Server | Lucky: 1 in 3 guests tips +50%, but walks 10% slower | 18g |
 - **Recipes & Goals** opens the book: pick up to 4 dishes for the menu,
   check your quests, and see your rank and milestones.
 - **Open Day** starts the next day (once banquets are unlocked, it asks
@@ -82,6 +93,9 @@ All art is placeholder shapes drawn in code, so the scripts are the whole game:
 | `scripts/cook.gd` / `waiter.gd` | Staff behavior |
 | `scripts/hud.gd` | All the on-screen UI, built in code |
 | `scripts/tavern_camera.gd` | Drag, pinch and wheel camera; turns taps into build clicks |
+| `scripts/staff_profiles.gd` | Staff types, traits, wages, names and looks |
+| `shaders/palette_swap.gdshader` | Gives each staff member their own skin and hair color |
+| `tools/sprites/make_sprites.py` | Draws the pixel-art staff sprite sheets (`python3 tools/sprites/make_sprites.py`) |
 
 ## Roadmap
 
@@ -104,8 +118,9 @@ All art is placeholder shapes drawn in code, so the scripts are the whole game:
    - ✅ Size and door are saved; older saves load as the original 8 x 10 floor
    - ✅ The camera zooms to fit the floor after each expansion
 6. ⬜ **Art and sound**
-   - Sprites for guests, nobles, staff, furniture and floor (sized to the
-     final square size and zoom)
+   - ✅ Pixel-art staff: 3 cook and 3 waiter types, each with a trait,
+     walk animations in 4 directions and per-person skin and hair colors
+   - ⬜ Sprites for guests, nobles, furniture and floor
    - Sound effects and music (they start after the first tap, as browsers require)
 7. ⬜ **UI moved into editable scenes**, so menus can be restyled in the
    Godot editor

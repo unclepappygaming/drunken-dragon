@@ -8,6 +8,9 @@
 # Walking uses the grid's pathfinder, so nobody walks through furniture.
 # If the player builds or sells something while someone is walking,
 # they plan a new route (see _on_layout_changed).
+#
+# Walkers with a sprite_sheet are drawn as animated pixel art facing the
+# way they walk (see draw_sprite). Guests still use simple shapes.
 # =====================================================================
 class_name Walker
 extends Node2D
@@ -28,6 +31,14 @@ var _outside_target: Vector2
 var _going_outside: bool = false
 # True when no route exists right now. We try again on the next layout change.
 var _stuck: bool = false
+
+# --- Sprite drawing ---
+const WALK_FPS: float = 6.0       # walk-cycle frames per second
+const SPRITE_SCALE: float = 2.0   # sheet pixels -> world pixels
+var sprite_sheet: Texture2D       # null = no sprite
+var _facing: String = "front"     # "front", "back", "left" or "right"
+var _anim_time: float = 0.0
+var _last_moved_frame: int = -10
 
 
 # Subclasses call this from their own setup().
@@ -80,6 +91,7 @@ func current_cell() -> Vector2i:
 func _walk(delta: float) -> bool:
 	if _stuck:
 		return false
+	var start_pos: Vector2 = position
 	var step: float = speed * delta
 	# A loop, so a fast step can pass a corner and keep going.
 	while not _path.is_empty() and step > 0.0:
@@ -92,7 +104,46 @@ func _walk(delta: float) -> bool:
 		else:
 			position = position.move_toward(next_point, step)
 			step = 0.0
+	_note_movement(position - start_pos, delta)
 	return _path.is_empty()
+
+
+# Remembers which way we're heading, for the sprite.
+func _note_movement(moved: Vector2, delta: float) -> void:
+	if moved.length() < 0.01:
+		return
+	_last_moved_frame = Engine.get_process_frames()
+	_anim_time += delta
+	if absf(moved.x) > absf(moved.y):
+		_facing = "right" if moved.x > 0 else "left"
+	else:
+		_facing = "front" if moved.y > 0 else "back"
+
+
+func is_moving() -> bool:
+	return Engine.get_process_frames() - _last_moved_frame <= 1
+
+
+# Draws the current frame of sprite_sheet. Call it from _draw().
+# Sheet columns: front x3, side x3 (facing right), back x3; each set is
+# [standing, walk 1, walk 2]. Row 1 is the same poses carrying a dish.
+func draw_sprite(carrying: bool = false) -> void:
+	if sprite_sheet == null:
+		return
+	var frame: Vector2 = Vector2(StaffProfiles.FRAME_SIZE)
+	var column: int = {"front": 0, "right": 3, "left": 3, "back": 6}[_facing]
+	if is_moving():
+		column += 1 + int(_anim_time * WALK_FPS) % 2
+	var source := Rect2(Vector2(column * frame.x, (1 if carrying else 0) * frame.y), frame)
+	var size: Vector2 = frame * SPRITE_SCALE
+	# The feet are near the bottom of the frame; stand them a little
+	# below our position, so we look like we're standing in our square.
+	var spot := Rect2(Vector2(-size.x / 2.0, 18.0 - size.y), size)
+	if _facing == "left":
+		# The sheet only faces right; mirror it to face left.
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2(-1, 1))
+	draw_texture_rect_region(sprite_sheet, spot, source)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _plan_route() -> void:

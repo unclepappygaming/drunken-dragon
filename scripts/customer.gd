@@ -51,6 +51,9 @@ var patience: float = MAX_PATIENCE
 var leave_reason: String = ""
 
 var _patience_max: float = MAX_PATIENCE   # what the patience bar counts down from
+# Extra share of the price they'll pay: from a Tavern Cook's portions or
+# a lucky tip. Nobles also tip on top (GameManager.NOBLE_TIP).
+var price_bonus: float = 0.0
 var _timer: float = 0.0
 var _bubble: String = ""             # text shown above their head
 var _color: Color
@@ -104,6 +107,16 @@ func say(text: String) -> void:
 	_bubble = text
 
 
+# Smooth Talker: a charming waiter buys some extra patience.
+func calm(seconds: float) -> void:
+	patience = minf(patience + seconds, _patience_max)
+
+
+func add_tip(share: float, text: String) -> void:
+	price_bonus += share
+	_bubble = text
+
+
 func _process(delta: float) -> void:
 	match state:
 		State.IN_LINE:
@@ -142,9 +155,10 @@ func _process(delta: float) -> void:
 		State.EATING:
 			_timer -= delta
 			if _timer <= 0.0:
-				var price: int = order["price"]
+				var share: float = 1.0 + price_bonus
 				if is_noble:
-					price += floori(price * GameManager.NOBLE_TIP)   # nobles tip well
+					share += GameManager.NOBLE_TIP   # nobles tip well
+				var price: int = roundi(order["price"] * share)
 				GameManager.earn(price)
 				_bubble = "+%dg" % price
 				_start_leaving("served")
