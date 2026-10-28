@@ -10,6 +10,13 @@ config/name="The Drunken Dragon"
 ; The scene Godot runs when you press Play (F5).
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.4", "Mobile")
+; The isometric version keeps its save in its own folder, so it never
+; mixes with the top-down version's save on the same computer.
+config/use_custom_user_dir=true
+config/custom_user_dir_name="drunken_dragon_isometric"
+; ...but not in the web build: there the save lives in the browser, and
+; changing the folder would make existing web saves disappear.
+config/use_custom_user_dir.web=false
 
 [autoload]
 
