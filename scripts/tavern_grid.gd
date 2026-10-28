@@ -1,10 +1,12 @@
 # =====================================================================
 # tavern_grid.gd  —  the tavern floor. Attached to the TavernGrid node.
 #
-# The floor is an 8 x 10 grid of squares. Each square can hold one piece
-# of furniture. This script:
+# The floor is a grid of squares, 8 x 10 to start. Expansions add
+# columns on the right and rows at the bottom, so existing squares keep
+# their coordinates. Each square can hold one piece of furniture.
+# This script:
 #   * draws the floor, walls, door and furniture
-#   * handles taps to build/remove furniture while in build mode
+#   * handles taps to build/remove furniture and move the door
 #   * finds walking routes around the furniture (pathfinding)
 #   * tracks which tables are taken
 #   * runs the Hearths: each one cooks one order at a time, but only
@@ -19,19 +21,32 @@ signal build_message(text: String)
 # a new route around it.
 signal layout_changed
 
-const COLS: int = 8
-const ROWS: int = 10
+const START_COLS: int = 8
+const START_ROWS: int = 10
 const CELL_SIZE: int = 80
 const NO_CELL: Vector2i = Vector2i(-1, -1)   # "nothing found" marker
-# The square just inside the front door. Everyone comes in and goes out
-# through it, so it can never be built on.
-const DOOR_CELL: Vector2i = Vector2i(4, 9)
+const DOOR_COST: int = 100
+# Which way is "outside" for each wall.
+const OUTWARD: Dictionary = {
+	"bottom": Vector2(0, 1), "top": Vector2(0, -1),
+	"left": Vector2(-1, 0), "right": Vector2(1, 0),
+}
 # The four squares touching a square (no diagonals). People stand on
 # one of these to use a piece of furniture.
 const SIDES: Array = [Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, -1)]
 
-# "" = not building. Otherwise "table", "kitchen" or "remove".
+# "" = not building. Otherwise "table", "kitchen", "remove" or "door".
 var build_type: String = ""
+
+var cols: int = START_COLS
+var rows: int = START_ROWS
+# The front door sits on one wall ("bottom", "top", "left" or "right"),
+# `door_index` squares along it.
+var door_side: String = "bottom"
+var door_index: int = 4
+# The square just inside the front door. Everyone comes in and goes out
+# through it, so it can never be built on.
+var door_cell: Vector2i = Vector2i(4, START_ROWS - 1)
 
 # Vector2i(column, row) -> furniture ID ("table" / "kitchen")
 var furniture: Dictionary = {}
@@ -51,12 +66,11 @@ var _astar := AStarGrid2D.new()
 
 
 func _ready() -> void:
-	_astar.region = Rect2i(0, 0, COLS, ROWS)
 	_astar.cell_size = Vector2(CELL_SIZE, CELL_SIZE)
 	# Diagonal steps are allowed, but never squeezing between two pieces
 	# of furniture or cutting a corner.
 	_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
-	_astar.update()   # required after changing region or cell_size
+	_apply_size()
 
 	# A free starter layout so Day 1 works right away.
 	_place(Vector2i(1, 2), "table")
@@ -75,9 +89,76 @@ func handle_tap(world_pos: Vector2) -> void:
 		_try_build(cell)
 
 
-# The floor plus the doorstep, in Main's space. The camera stays over it.
+# The floor itself, in Main's space.
+func play_rect() -> Rect2:
+	return Rect2(position, Vector2(cols * CELL_SIZE, rows * CELL_SIZE))
+
+
+# The floor plus room for the doorstep on every side. The camera stays over it.
 func floor_rect() -> Rect2:
-	return Rect2(position, Vector2(COLS * CELL_SIZE, ROWS * CELL_SIZE + 60))
+	return play_rect().grow(70)
+
+
+# Makes the floor bigger (or sets its size when loading a save). New
+# squares are empty, so nobody can get walled in by this.
+# announce = false while loading, before staff exist.
+func resize(new_cols: int, new_rows: int, announce: bool = true) -> void:
+	cols = new_cols
+	rows = new_rows
+	# The door stays on the same wall; on a wall that moved, it moves too.
+	set_door(door_side, door_index)
+	_apply_size()
+	if announce:
+		layout_changed.emit()
+
+
+# Puts the door on a wall. Used when loading; the Door tool checks first.
+func set_door(side: String, index: int) -> void:
+	if not OUTWARD.has(side):
+		side = "bottom"
+	var wall_length: int = cols if side in ["top", "bottom"] else rows
+	door_side = side
+	door_index = clampi(index, 0, wall_length - 1)
+	door_cell = _door_cell_for(door_side, door_index)
+
+
+# The door as plain data for the save file.
+func get_door() -> Array:
+	return [door_side, door_index]
+
+
+# Rebuilds the pathfinder for the current size. AStarGrid2D.update()
+# forgets which squares are solid, so the furniture is marked again.
+func _apply_size() -> void:
+	_astar.region = Rect2i(0, 0, cols, rows)
+	_astar.update()
+	for cell in furniture:
+		_astar.set_point_solid(cell, true)
+	queue_redraw()
+
+
+func _door_cell_for(side: String, index: int) -> Vector2i:
+	match side:
+		"top": return Vector2i(index, 0)
+		"left": return Vector2i(0, index)
+		"right": return Vector2i(cols - 1, index)
+	return Vector2i(index, rows - 1)   # bottom
+
+
+# Which wall an edge square is on, or "" if it's not on the edge.
+# Corner squares count as the top or bottom wall.
+func _side_of(cell: Vector2i) -> String:
+	if not _in_bounds(cell):
+		return ""
+	if cell.y == rows - 1:
+		return "bottom"
+	if cell.y == 0:
+		return "top"
+	if cell.x == 0:
+		return "left"
+	if cell.x == cols - 1:
+		return "right"
+	return ""
 
 
 func _process(delta: float) -> void:
@@ -126,7 +207,15 @@ func cell_center(cell: Vector2i) -> Vector2:
 
 # Just outside the front door, where people appear and disappear.
 func door_position() -> Vector2:
-	return position + Vector2((DOOR_CELL.x + 0.5) * CELL_SIZE, ROWS * CELL_SIZE + 30)
+	return cell_center(door_cell) + OUTWARD[door_side] * (CELL_SIZE / 2.0 + 30.0)
+
+
+# Which way the waiting line runs along the outside wall: toward the
+# longer stretch of wall, so it has room.
+func line_direction() -> Vector2:
+	if door_side in ["top", "bottom"]:
+		return Vector2(-1, 0) if door_index >= cols / 2.0 else Vector2(1, 0)
+	return Vector2(0, 1) if door_index < rows / 2.0 else Vector2(0, -1)
 
 
 # Which square a Main-space position is on (NO_CELL if off the floor).
@@ -149,7 +238,7 @@ func find_path(from_cell: Vector2i, to_cell: Vector2i) -> Array[Vector2i]:
 func access_cell(furniture_cell: Vector2i, from_pos: Vector2, asker: Node = null) -> Vector2i:
 	var start: Vector2i = cell_at_world(from_pos)
 	if start == NO_CELL:
-		start = DOOR_CELL
+		start = door_cell
 	var in_use: Dictionary = _cells_in_use(asker)
 
 	var best: Vector2i = NO_CELL
@@ -253,7 +342,7 @@ func load_layout(layout: Array) -> void:
 		if typeof(entry) != TYPE_ARRAY or entry.size() != 3:
 			continue
 		var cell := Vector2i(int(entry[0]), int(entry[1]))
-		if _in_bounds(cell) and cell != DOOR_CELL and GameManager.FURNITURE.has(entry[2]):
+		if _in_bounds(cell) and cell != door_cell and GameManager.FURNITURE.has(entry[2]):
 			_place(cell, entry[2])
 
 
@@ -264,10 +353,13 @@ func _try_build(cell: Vector2i) -> void:
 	if build_type == "remove":
 		_try_remove(cell)
 		return
+	if build_type == "door":
+		_try_move_door(cell)
+		return
 	if furniture.has(cell):
 		build_message.emit("That square is taken.")
 		return
-	if cell == DOOR_CELL:
+	if cell == door_cell:
 		build_message.emit("Keep the doorway clear!")
 		return
 	if _cells_in_use(null).has(cell):
@@ -321,17 +413,55 @@ func _try_remove(cell: Vector2i) -> void:
 	build_message.emit("Sold for %dg." % refund)
 
 
-# Would the tavern still work with furniture on new_cell? Every piece of
-# furniture needs a side people can reach, and nobody may get walled in.
+# Moving the door is only allowed between days, with everyone inside,
+# so nobody is caught walking to the old doorway.
+func _try_move_door(cell: Vector2i) -> void:
+	if GameManager.is_open or not get_tree().get_nodes_in_group("customers").is_empty():
+		build_message.emit("Move the door after closing time.")
+		return
+	var side: String = _side_of(cell)
+	if side == "":
+		build_message.emit("The door has to go on an outside wall.")
+		return
+	if cell == door_cell:
+		build_message.emit("The door is already here.")
+		return
+	if furniture.has(cell):
+		build_message.emit("Clear that square first.")
+		return
+	if _cells_in_use(null).has(cell):
+		build_message.emit("Someone's in the way!")
+		return
+	for walker in get_tree().get_nodes_in_group("walkers"):
+		if walker.current_cell() == NO_CELL:
+			build_message.emit("Wait until everyone is inside.")
+			return
+	if not _layout_works(furniture, cell):
+		build_message.emit("That would block someone's way!")
+		return
+	if not GameManager.try_spend(DOOR_COST):
+		build_message.emit("Not enough gold!")
+		return
+	set_door(side, cell.x if side in ["top", "bottom"] else cell.y)
+	layout_changed.emit()
+	build_message.emit("Moved the door.")
+
+
+# Would the tavern still work with furniture on new_cell?
 func _layout_works_with(new_cell: Vector2i) -> bool:
-	# Pretend the new piece is already there...
+	# Pretend the new piece is already there.
 	var solid: Dictionary = furniture.duplicate()
 	solid[new_cell] = true
+	return _layout_works(solid, door_cell)
 
-	# ...then FLOOD FILL outward from the door: visit every square we can
-	# walk to, one step at a time, until there's nowhere new to go.
-	var reachable: Dictionary = {DOOR_CELL: true}
-	var to_visit: Array[Vector2i] = [DOOR_CELL]
+
+# Every piece of furniture needs a side people can reach from the door,
+# and nobody may get walled in.
+func _layout_works(solid: Dictionary, door: Vector2i) -> bool:
+	# FLOOD FILL outward from the door: visit every square we can walk
+	# to, one step at a time, until there's nowhere new to go.
+	var reachable: Dictionary = {door: true}
+	var to_visit: Array[Vector2i] = [door]
 	while not to_visit.is_empty():
 		var here: Vector2i = to_visit.pop_back()
 		for side in SIDES:
@@ -368,7 +498,7 @@ func _cells_in_use(ignore: Node) -> Dictionary:
 
 
 func _in_bounds(cell: Vector2i) -> bool:
-	return cell.x >= 0 and cell.y >= 0 and cell.x < COLS and cell.y < ROWS
+	return cell.x >= 0 and cell.y >= 0 and cell.x < cols and cell.y < rows
 
 
 func _cell_at(local_pos: Vector2) -> Vector2i:
@@ -396,11 +526,11 @@ func _pop_next_order() -> Customer:
 # ---------------------------------------------------------------------
 func _draw() -> void:
 	var font: Font = ThemeDB.fallback_font
-	var floor_size := Vector2(COLS * CELL_SIZE, ROWS * CELL_SIZE)
+	var floor_size := Vector2(cols * CELL_SIZE, rows * CELL_SIZE)
 
 	# Checkerboard wooden floor.
-	for x in COLS:
-		for y in ROWS:
+	for x in cols:
+		for y in rows:
 			var shade: float = 0.38 if (x + y) % 2 == 0 else 0.33
 			draw_rect(Rect2(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE),
 					Color(shade, shade * 0.72, shade * 0.5))
@@ -408,15 +538,28 @@ func _draw() -> void:
 	# Faint grid lines while building, so squares are easy to see,
 	# and a red tint on the doorway, which can't be built on.
 	if build_type != "":
-		for x in COLS + 1:
+		for x in cols + 1:
 			draw_line(Vector2(x * CELL_SIZE, 0), Vector2(x * CELL_SIZE, floor_size.y), Color(1, 1, 1, 0.25), 2.0)
-		for y in ROWS + 1:
+		for y in rows + 1:
 			draw_line(Vector2(0, y * CELL_SIZE), Vector2(floor_size.x, y * CELL_SIZE), Color(1, 1, 1, 0.25), 2.0)
-		draw_rect(Rect2(Vector2(DOOR_CELL) * CELL_SIZE, Vector2(CELL_SIZE, CELL_SIZE)), Color(1, 0.2, 0.2, 0.2))
+		draw_rect(Rect2(Vector2(door_cell) * CELL_SIZE, Vector2(CELL_SIZE, CELL_SIZE)), Color(1, 0.2, 0.2, 0.2))
+	# With the Door tool, show every square along the walls it could go.
+	if build_type == "door":
+		for x in cols:
+			for y in rows:
+				var spot := Vector2i(x, y)
+				if _side_of(spot) != "" and spot != door_cell and not furniture.has(spot):
+					draw_rect(Rect2(Vector2(spot) * CELL_SIZE, Vector2(CELL_SIZE, CELL_SIZE)), Color(1.0, 0.85, 0.3, 0.18))
 
-	# Walls and door.
+	# Walls and door. The doormat sticks out through the wall.
 	draw_rect(Rect2(Vector2.ZERO, floor_size), Color(0.2, 0.12, 0.07), false, 8.0)
-	draw_rect(Rect2(DOOR_CELL.x * CELL_SIZE, floor_size.y - 4, CELL_SIZE, 60), Color(0.45, 0.3, 0.15))
+	var door_rect := Rect2(Vector2(door_cell) * CELL_SIZE, Vector2(CELL_SIZE, CELL_SIZE))
+	match door_side:
+		"bottom": door_rect = Rect2(door_rect.position.x, floor_size.y - 4, CELL_SIZE, 60)
+		"top": door_rect = Rect2(door_rect.position.x, -56, CELL_SIZE, 60)
+		"left": door_rect = Rect2(-56, door_rect.position.y, 60, CELL_SIZE)
+		"right": door_rect = Rect2(floor_size.x - 4, door_rect.position.y, 60, CELL_SIZE)
+	draw_rect(door_rect, Color(0.45, 0.3, 0.15))
 
 	# Furniture.
 	for cell in furniture:

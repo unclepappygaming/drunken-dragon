@@ -8,7 +8,8 @@
 #   * tells the grid which build tool the HUD selected
 #   * decides which guests are nobles
 #   * frees tables, changes fame and records stats when guests leave
-#   * announces recipes earned from quests and patron ideas
+#   * announces recipes and expansions earned from quests
+#   * builds expansions and keeps the camera fitted to the floor
 #   * shows the end-of-day summary once the last guest is gone
 #   * loads the saved game at startup and saves between days
 # =====================================================================
@@ -44,10 +45,10 @@ func _ready() -> void:
 	hud.day_start_requested.connect(_on_day_start_requested)
 	hud.staff_change_requested.connect(_on_staff_change_requested)
 	hud.new_game_requested.connect(_on_new_game_requested)
+	hud.expand_requested.connect(_on_expand_requested)
 	# You can connect a signal straight to another node's function.
 	grid.build_message.connect(hud.show_message)
 	camera.tapped.connect(grid.handle_tap)
-	camera.bounds = grid.floor_rect()
 	spawn_timer.timeout.connect(_on_spawn_timer_timeout)
 	GameManager.shop_closed.connect(_on_shop_closed)
 	# Building or selling between days changes the save, so save again.
@@ -64,6 +65,12 @@ func _ready() -> void:
 		hud.show_summary(
 			"Welcome to\nThe Drunken Dragon!\n\nGuests sit at Tables. Waiters take orders and carry food; Cooks work the Hearths. Staff get paid every night.\n\nHappy patrons share recipe ideas, and quests teach you more. See Recipes.\n\nDrag to look around and pinch to zoom.")
 	else:
+		# Size and door first, so the furniture lands on the right floor.
+		var size: Vector2i = GameManager.floor_size()
+		grid.resize(size.x, size.y, false)
+		var door = save.get("door", [])
+		if typeof(door) == TYPE_ARRAY and door.size() == 2:
+			grid.set_door(str(door[0]), int(door[1]))
 		grid.load_layout(save.get("furniture", []))
 		# clampi keeps a number within limits, in case the file was edited.
 		for i in clampi(int(save.get("cooks", 1)), 1, MAX_STAFF):
@@ -77,7 +84,14 @@ func _ready() -> void:
 			"Welcome back to\nThe Drunken Dragon!\n\n%s\nGold: %d\nFame: %d" % [progress, GameManager.gold, GameManager.fame],
 			true)
 	_update_staff_display()
+	_fit_camera()
 	hud.set_day_button("Open\nDay %d" % (GameManager.day + 1), true)
+
+
+func _fit_camera() -> void:
+	camera.bounds = grid.floor_rect()
+	# grow() leaves room around the walls for the doorstep and the line.
+	camera.frame(grid.play_rect().grow(45), TavernHUD.TOP_HEIGHT, TavernHUD.BAR_HEIGHT)
 
 
 func _process(_delta: float) -> void:
@@ -141,7 +155,7 @@ func _seat(customer: Customer, cell: Vector2i) -> void:
 
 # The line runs left along the outside wall, starting beside the door.
 func _line_spot(place: int) -> Vector2:
-	return grid.door_position() + Vector2(-60.0 - place * LINE_GAP, 0.0)
+	return grid.door_position() + grid.line_direction() * (60.0 + place * LINE_GAP)
 
 
 # Give free tables to the front of the line, then shuffle everyone up.
@@ -194,6 +208,26 @@ func _announce_unlocks(ids: Array[String], speaker: Customer) -> void:
 				speaker.say("Try %s!" % recipe["name"])
 		else:
 			hud.show_message("Quest done: %s! New recipe: %s." % [unlock["title"], recipe["name"]], 5.0)
+	var expansion_quest: String = GameManager.check_expansion_ready()
+	if expansion_quest != "":
+		hud.show_message("Quest done: %s! You can expand the tavern (Build > Expand)." % expansion_quest, 6.0)
+
+
+func _on_expand_requested() -> void:
+	if GameManager.is_open or _waiting_for_last_guests:
+		hud.show_message("Expand the tavern after closing time.")
+		return
+	var next: Dictionary = GameManager.next_expansion()
+	if next.is_empty() or not GameManager.expansion_quest_done():
+		return
+	if not GameManager.try_spend(next["cost"]):
+		hud.show_message("Not enough gold (%dg)." % next["cost"])
+		return
+	GameManager.expansions_built += 1
+	grid.resize(next["cols"], next["rows"])   # also saves, via layout_changed
+	_fit_camera()
+	hud.close_expand_panel()
+	hud.show_message("The tavern grew to %d x %d!" % [next["cols"], next["rows"]], 4.0)
 
 
 func _on_shop_closed(_day: int) -> void:
@@ -262,7 +296,7 @@ func _save_if_closed() -> void:
 	# Mid-day changes are saved at the end of the day instead.
 	if GameManager.is_open or _waiting_for_last_guests:
 		return
-	GameManager.save_game(grid.get_layout(),
+	GameManager.save_game(grid.get_layout(), grid.get_door(),
 			get_tree().get_nodes_in_group("cooks").size(),
 			get_tree().get_nodes_in_group("waiters").size())
 

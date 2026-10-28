@@ -17,7 +17,7 @@ extends Camera2D
 signal tapped(world_pos: Vector2)
 
 # Godot zoom: 2.0 = everything twice as big, 0.5 = half size.
-const MIN_ZOOM: float = 0.7
+const MIN_ZOOM: float = 0.6   # low enough to see the biggest tavern whole
 const MAX_ZOOM: float = 2.0
 const WHEEL_STEP: float = 1.1
 # A finger has to move this many pixels before a tap becomes a drag,
@@ -100,6 +100,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMagnifyGesture:
 		_zoom_at(event.position, event.factor)
 		get_viewport().set_input_as_handled()
+
+
+# Zooms and centers so `area` fits in the space between the top and
+# bottom bars (as far as MIN_ZOOM allows). Used at startup and after
+# the tavern grows.
+func frame(area: Rect2, top_bar: float, bottom_bar: float) -> void:
+	var view: Vector2 = get_viewport_rect().size
+	var room := Vector2(view.x - 40.0, view.y - top_bar - bottom_bar - 40.0)
+	var fit: float = minf(1.0, minf(room.x / area.size.x, room.y / area.size.y))
+	var new_zoom: float = clampf(fit, MIN_ZOOM, MAX_ZOOM)
+	zoom = Vector2(new_zoom, new_zoom)
+	# The middle of the space between the bars sits a little off the
+	# middle of the screen, because the bars are different heights.
+	position = area.get_center() + Vector2(0, (bottom_bar - top_bar) / 2.0 / new_zoom)
+	_keep_in_bounds()
 
 
 # Converts a point on the screen to a point in the tavern world.

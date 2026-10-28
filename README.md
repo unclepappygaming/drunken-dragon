@@ -28,8 +28,12 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 
 The bottom bar has four buttons:
 
-- **Build** opens a tray: Table, Hearth, Sell. You can't block the doorway
-  or wall anyone in.
+- **Build** opens a tray: Table, Hearth, Sell, Door and Expand. You can't
+  block the doorway or wall anyone in.
+  - **Door** moves the front door to any square along a wall (100g, between
+    days). The waiting line follows it.
+  - **Expand** makes the floor bigger, up to 12 x 14. Each expansion is
+    unlocked by a quest (like "Serve 60 guests"), then bought with gold.
 - **Staff** opens a tray to hire or fire cooks and waiters (between days
   only). Wages are paid every night.
 - **Recipes** opens the recipe book: pick up to 4 dishes for the menu and
@@ -79,12 +83,11 @@ All art is placeholder shapes drawn in code, so the scripts are the whole game:
    - Busy-hour rushes so a well-staffed tavern still feels stretched
    - Slow down fame growth from nobles (it can jump 30 → 80 in two days)
    - Tune prices, cook times, patience and wages against real play
-5. ⬜ **Bigger tavern**
-   - Buy floor expansions (extra rows and columns) up to a maximum size
-   - Move the front door to any wall, with the same "nothing gets blocked" check
-   - The grid size and door position are saved; older saves load as the
-     original 8×10 floor with the door at the bottom
-   - The camera keeps a larger floor reachable on a phone screen
+5. ✅ **Bigger tavern**
+   - ✅ Four floor expansions up to 12 x 14, each earned by a quest, then bought
+   - ✅ Move the front door to any wall, with the same "nothing gets blocked" check
+   - ✅ Size and door are saved; older saves load as the original 8 x 10 floor
+   - ✅ The camera zooms to fit the floor after each expansion
 6. ⬜ **Art and sound**
    - Sprites for guests, nobles, staff, furniture and floor (sized to the
      final square size and zoom)

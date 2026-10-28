@@ -10,7 +10,7 @@
 #   tray:        a row of options that pops up above the bottom bar when
 #                Build or Staff is tapped, and hides again when done
 #   cards:       the day summary (closes with Continue, so you can build
-#                between days) and the recipe book
+#                between days), the recipe book and the expansion card
 #
 # The UI is built in code here so you don't have to click together
 # dozens of nodes in the editor. A later milestone moves it into a
@@ -23,7 +23,9 @@ signal build_selected(type: String)     # "table", "kitchen", "remove" or ""
 signal day_start_requested
 signal staff_change_requested(role: String, change: int)   # "cook"/"waiter", +1 or -1
 signal new_game_requested
+signal expand_requested
 
+const TOP_HEIGHT: int = 150
 const BAR_HEIGHT: int = 120
 const TRAY_HEIGHT: int = 110
 const HIGHLIGHT := Color(1.0, 0.85, 0.45)   # tint for the selected button
@@ -51,6 +53,9 @@ var _new_game_armed: bool = false   # true after the first tap
 var _recipe_panel: PanelContainer
 var _recipe_header: Label
 var _recipe_list: VBoxContainer
+var _expand_panel: PanelContainer
+var _expand_label: Label
+var _expand_button: Button
 
 var _current_hint: String = "Drag to look around. Pinch to zoom."
 var _message_time_left: float = 0.0
@@ -62,6 +67,7 @@ func _ready() -> void:
 	_build_bottom_bar()
 	_build_summary_panel()
 	_build_recipe_panel()
+	_build_expand_panel()
 
 	# CONNECTING SIGNALS: "when GameManager emits gold_changed, run my
 	# _on_gold_changed function". The signal passes along the new amount.
@@ -70,6 +76,8 @@ func _ready() -> void:
 	GameManager.clock_changed.connect(_on_clock_changed)
 	GameManager.shop_opened.connect(_on_shop_opened)
 	GameManager.recipes_changed.connect(_refresh_recipes)
+	# Gold decides whether the expansion can be afforded.
+	GameManager.gold_changed.connect(_refresh_expand_panel.unbind(1))
 
 	# Show the starting values.
 	_on_gold_changed(GameManager.gold)
@@ -105,7 +113,12 @@ func show_summary(text: String, allow_new_game: bool = false) -> void:
 	_new_game_armed = false
 	_new_game_button.text = "New Game"
 	_recipe_panel.visible = false
+	_expand_panel.visible = false
 	_summary_panel.visible = true
+
+
+func close_expand_panel() -> void:
+	_expand_panel.visible = false
 
 
 # The fourth bottom button: "Open Day 3" between days, greyed out while open.
@@ -166,6 +179,7 @@ func _select_tool(type: String) -> void:
 		"table":   _set_hint("Tap a square: Table (50g)")
 		"kitchen": _set_hint("Tap a square: Hearth (120g)")
 		"remove":  _set_hint("Tap furniture to sell it (half price)")
+		"door":    _set_hint("Tap a square along a wall to move the door (%dg)" % TavernGrid.DOOR_COST)
 
 
 func _set_hint(text: String) -> void:
@@ -177,7 +191,16 @@ func _set_hint(text: String) -> void:
 func _on_day_button() -> void:
 	_summary_panel.visible = false
 	_recipe_panel.visible = false
+	_expand_panel.visible = false
 	day_start_requested.emit()
+
+
+func _on_expand_tool() -> void:
+	_select_tool("")
+	_summary_panel.visible = false
+	_recipe_panel.visible = false
+	_expand_panel.visible = true
+	_refresh_expand_panel()
 
 
 func _on_continue_button() -> void:
@@ -187,6 +210,7 @@ func _on_continue_button() -> void:
 func _on_recipes_button() -> void:
 	_set_tray("")
 	_summary_panel.visible = false
+	_expand_panel.visible = false
 	_recipe_panel.visible = not _recipe_panel.visible
 	_refresh_recipes()
 
@@ -314,11 +338,15 @@ func _build_trays() -> void:
 	_build_tray = build_panel
 	var build_row := HBoxContainer.new()
 	build_panel.add_child(build_row)
-	for entry in [["Table\n50g", "table"], ["Hearth\n120g", "kitchen"], ["Sell", "remove"]]:
-		var button := _make_button(entry[0], 24, build_row, 86)
+	var tools: Array = [["Table\n50g", "table"], ["Hearth\n120g", "kitchen"], ["Sell", "remove"],
+			["Door\n%dg" % TavernGrid.DOOR_COST, "door"]]
+	for entry in tools:
+		var button := _make_button(entry[0], 21, build_row, 86)
 		button.pressed.connect(_select_tool.bind(entry[1]))
 		_tool_buttons[entry[1]] = button
-	var done := _make_button("Done", 24, build_row, 86)
+	var expand := _make_button("Expand", 21, build_row, 86)
+	expand.pressed.connect(_on_expand_tool)
+	var done := _make_button("Done", 21, build_row, 86)
 	done.pressed.connect(_set_tray.bind(""))
 
 	# Staff tray. [button text, role, +1 hire / -1 let go]
@@ -469,3 +497,54 @@ func _refresh_recipes() -> void:
 		button.modulate = Color(0.6, 1.0, 0.6) if on_menu else Color.WHITE
 		button.pressed.connect(_on_menu_toggle_pressed.bind(id))
 		row.add_child(button)
+
+
+# The expansion card: what the next expansion adds, its quest, the cost,
+# and a button to build it once the quest is done.
+func _build_expand_panel() -> void:
+	_expand_panel = PanelContainer.new()
+	add_child(_expand_panel)
+	_expand_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_expand_panel.offset_left = -290
+	_expand_panel.offset_right = 290
+	_expand_panel.offset_top = -230
+	_expand_panel.offset_bottom = 230
+	_expand_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_expand_panel.visible = false
+	_solid(_expand_panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 18)
+	_expand_panel.add_child(vbox)
+
+	_expand_label = _make_label(26)
+	_expand_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_expand_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_expand_label)
+
+	_expand_button = _make_button("Build", 28, vbox, 90)
+	_expand_button.pressed.connect(expand_requested.emit)
+	var close := _make_button("Close", 24, vbox, 70)
+	close.pressed.connect(close_expand_panel)
+
+
+func _refresh_expand_panel() -> void:
+	if not _expand_panel.visible:
+		return
+	var next: Dictionary = GameManager.next_expansion()
+	if next.is_empty():
+		_expand_label.text = "Expand the Tavern\n\nYour tavern is as big as it gets!"
+		_expand_button.visible = false
+		return
+	var size: Vector2i = GameManager.floor_size()
+	var done: bool = GameManager.expansion_quest_done()
+	_expand_label.text = "Expand the Tavern\n\nFloor: %d x %d  ->  %d x %d\n\nQuest: %s\n%s (%d/%d)%s\n\nCost: %dg" % [
+		size.x, size.y, next["cols"], next["rows"],
+		next["title"], next["task"], GameManager.expansion_progress(), next["goal"],
+		"  Done!" if done else "",
+		next["cost"],
+	]
+	_expand_button.visible = true
+	_expand_button.text = "Build (%dg)" % next["cost"] if done else "Finish the quest first"
+	_expand_button.disabled = not done or GameManager.gold < next["cost"]

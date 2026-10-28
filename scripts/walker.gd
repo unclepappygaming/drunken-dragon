@@ -106,8 +106,8 @@ func _plan_route() -> void:
 		# Outside: step in front of the door first, so we don't walk
 		# through the wall, then come in through the door.
 		_path.append(grid.door_position())
-		start = TavernGrid.DOOR_CELL
-	var goal: Vector2i = TavernGrid.DOOR_CELL if _leaving_by_door else destination
+		start = grid.door_cell
+	var goal: Vector2i = grid.door_cell if _leaving_by_door else destination
 	if goal == TavernGrid.NO_CELL:
 		return
 

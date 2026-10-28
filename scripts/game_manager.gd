@@ -37,9 +37,9 @@ const STARTING_GOLD: int = 200
 # phone it's private app storage; in a web browser it's browser storage.
 const SAVE_PATH: String = "user://save.json"
 # Bump this if the save format ever changes, so old saves can be handled.
-# Version 2 added recipes and the menu; version 3 added lifetime stats
-# (for quests). Older saves still load.
-const SAVE_VERSION: int = 3
+# Version 2 added recipes and the menu, version 3 lifetime stats (for
+# quests), version 4 expansions and the door. Older saves still load.
+const SAVE_VERSION: int = 4
 
 # Everything the player can build. The key ("table") is the ID the
 # other scripts use; the inner Dictionary holds its details.
@@ -92,6 +92,19 @@ const MAX_MENU: int = 4          # dishes on the menu at once
 const NOBLE_FAME: int = 25       # nobles start visiting at this much fame
 const PERFECT_DAY_GUESTS: int = 15   # guests needed for a "perfect day"
 
+# Making the tavern bigger, one step at a time. Each step's quest has to
+# be done before you can pay for it. cols/rows = floor size afterwards.
+const EXPANSIONS: Array = [
+	{"cols": 10, "rows": 10, "cost": 300, "stat": "served", "goal": 60,
+		"title": "Room to Grow", "task": "Serve 60 guests"},
+	{"cols": 10, "rows": 12, "cost": 500, "stat": "best_fame", "goal": 30,
+		"title": "Talk of the Town", "task": "Reach 30 fame"},
+	{"cols": 12, "rows": 12, "cost": 800, "stat": "nobles", "goal": 15,
+		"title": "Fit for Nobles", "task": "Serve 15 nobles"},
+	{"cols": 12, "rows": 14, "cost": 1200, "stat": "perfect_days", "goal": 2,
+		"title": "The Grand Hall", "task": "Have 2 perfect days (no walk-outs, 15+ guests)"},
+]
+
 # ---------------------------------------------------------------------
 # GAME STATE
 # ---------------------------------------------------------------------
@@ -110,6 +123,8 @@ var menu: Array[String] = STARTER_RECIPES.duplicate()
 # Lifetime counters that quests and patron ideas check, e.g.
 # {"served": 41, "nobles": 3, "dish:stew": 9, "perfect_days": 1, "best_fame": 27}
 var stats: Dictionary = {}
+
+var expansions_built: int = 0
 
 # Stats for the end-of-day summary (reset every morning).
 var today_income: int = 0
@@ -198,6 +213,7 @@ func reset() -> void:
 	known_recipes = STARTER_RECIPES.duplicate()
 	menu = STARTER_RECIPES.duplicate()
 	stats = {}
+	expansions_built = 0
 	order_requests.clear()
 	order_queue.clear()
 
@@ -209,16 +225,18 @@ func reset() -> void:
 # dishes or guests mid-walk to store.
 #
 # The save is a JSON text file, so you can open it and read it.
-# main.gd supplies the furniture and staff; we add gold, fame, day,
-# recipes and stats.
+# main.gd supplies the furniture, door and staff; we add gold, fame,
+# day, recipes, stats and expansions.
 # ---------------------------------------------------------------------
-func save_game(layout: Array, cooks: int, waiters: int) -> void:
+func save_game(layout: Array, door: Array, cooks: int, waiters: int) -> void:
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"day": day,
 		"gold": gold,
 		"fame": fame,
 		"furniture": layout,
+		"door": door,
+		"expansions": expansions_built,
 		"cooks": cooks,
 		"waiters": waiters,
 		"recipes": known_recipes,
@@ -259,6 +277,8 @@ func load_game() -> Dictionary:
 	stats = saved_stats if typeof(saved_stats) == TYPE_DICTIONARY else {}
 	# Saves from before stats existed: count the fame they already have.
 	stats["best_fame"] = maxi(stat("best_fame"), fame)
+	# Saves from before expansions: the original floor.
+	expansions_built = clampi(int(parsed.get("expansions", 0)), 0, EXPANSIONS.size())
 	gold_changed.emit(gold)
 	fame_changed.emit(fame)
 	return parsed
@@ -361,6 +381,45 @@ func check_unlocks() -> Array[String]:
 	if not unlocked.is_empty():
 		recipes_changed.emit()
 	return unlocked
+
+
+# ---------------------------------------------------------------------
+# EXPANSIONS
+# ---------------------------------------------------------------------
+# The floor size for the expansions built so far.
+func floor_size() -> Vector2i:
+	if expansions_built == 0:
+		return Vector2i(TavernGrid.START_COLS, TavernGrid.START_ROWS)
+	var last: Dictionary = EXPANSIONS[expansions_built - 1]
+	return Vector2i(last["cols"], last["rows"])
+
+
+# The next expansion, or {} once the tavern is as big as it gets.
+func next_expansion() -> Dictionary:
+	if expansions_built >= EXPANSIONS.size():
+		return {}
+	return EXPANSIONS[expansions_built]
+
+
+func expansion_progress() -> int:
+	var next: Dictionary = next_expansion()
+	if next.is_empty():
+		return 0
+	return mini(stat(next["stat"]), next["goal"])
+
+
+func expansion_quest_done() -> bool:
+	var next: Dictionary = next_expansion()
+	return not next.is_empty() and stat(next["stat"]) >= next["goal"]
+
+
+# Returns the quest title the first time the next expansion's quest is
+# done (so it's announced once), otherwise "".
+func check_expansion_ready() -> String:
+	if not expansion_quest_done() or stat("expansion_announced") > expansions_built:
+		return ""
+	stats["expansion_announced"] = expansions_built + 1
+	return next_expansion()["title"]
 
 
 # ---------------------------------------------------------------------
