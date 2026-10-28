@@ -22,7 +22,7 @@ signal fame_changed(new_amount: int)
 signal clock_changed(hour: int, minute: int)
 signal shop_opened(day: int)
 signal shop_closed(day: int)
-signal recipes_changed   # a recipe was learned or the menu changed
+signal recipes_changed   # a recipe was unlocked or the menu changed
 
 # ---------------------------------------------------------------------
 # TUNING CONSTANTS — tweak these to change how the game feels.
@@ -37,8 +37,9 @@ const STARTING_GOLD: int = 200
 # phone it's private app storage; in a web browser it's browser storage.
 const SAVE_PATH: String = "user://save.json"
 # Bump this if the save format ever changes, so old saves can be handled.
-# Version 2 added recipes and the menu. Version 1 saves still load.
-const SAVE_VERSION: int = 2
+# Version 2 added recipes and the menu; version 3 added lifetime stats
+# (for quests). Older saves still load.
+const SAVE_VERSION: int = 3
 
 # Everything the player can build. The key ("table") is the ID the
 # other scripts use; the inner Dictionary holds its details.
@@ -56,22 +57,40 @@ const STAFF: Dictionary = {
 # Every dish the tavern could ever serve. The key ("ale") is the ID.
 #   tier 1-2: what common folk order
 #   tier 3:   fancy dishes only nobles order
-#   learn:    gold it costs to learn the recipe (0 = known from the start)
+#   unlock:   how you earn it (starter recipes have none). It finishes
+#             when the lifetime stat `stat` reaches `goal`:
+#               "patron" = a guest shares the idea
+#               "quest"  = a named task shown in the recipe book
 # Pricier dishes earn more per guest but keep a Hearth busy longer.
 const RECIPES: Dictionary = {
-	"ale":     {"name": "Dragon Ale",       "price": 12, "cook_time": 2.5,  "tier": 1, "learn": 0},
-	"stew":    {"name": "Mushroom Stew",    "price": 18, "cook_time": 4.0,  "tier": 1, "learn": 0},
-	"mead":    {"name": "Honey Mead",       "price": 16, "cook_time": 3.0,  "tier": 1, "learn": 80},
-	"boar":    {"name": "Roast Boar",       "price": 28, "cook_time": 6.0,  "tier": 2, "learn": 0},
-	"cheese":  {"name": "Troll Cheese",     "price": 24, "cook_time": 4.0,  "tier": 2, "learn": 150},
-	"wings":   {"name": "Wyvern Wings",     "price": 34, "cook_time": 6.5,  "tier": 2, "learn": 250},
-	"wine":    {"name": "Elven Wine",       "price": 45, "cook_time": 5.0,  "tier": 3, "learn": 300},
-	"phoenix": {"name": "Phoenix Roast",    "price": 60, "cook_time": 9.0,  "tier": 3, "learn": 450},
-	"feast":   {"name": "Dragonfire Feast", "price": 85, "cook_time": 12.0, "tier": 3, "learn": 700},
+	"ale":     {"name": "Dragon Ale",       "price": 12, "cook_time": 2.5,  "tier": 1},
+	"stew":    {"name": "Mushroom Stew",    "price": 18, "cook_time": 4.0,  "tier": 1},
+	"mead":    {"name": "Honey Mead",       "price": 16, "cook_time": 3.0,  "tier": 1,
+			"unlock": {"by": "patron", "stat": "served", "goal": 20,
+				"task": "A regular may share it once you've served 20 guests",
+				"who": "A regular"}},
+	"boar":    {"name": "Roast Boar",       "price": 28, "cook_time": 6.0,  "tier": 2},
+	"cheese":  {"name": "Troll Cheese",     "price": 24, "cook_time": 4.0,  "tier": 2,
+			"unlock": {"by": "quest", "stat": "dish:stew", "goal": 12,
+				"title": "The Bridge Troll", "task": "Serve 12 Mushroom Stews"}},
+	"wings":   {"name": "Wyvern Wings",     "price": 34, "cook_time": 6.5,  "tier": 2,
+			"unlock": {"by": "quest", "stat": "perfect_days", "goal": 1,
+				"title": "Hunter's Challenge", "task": "Finish a day with no walk-outs and 15+ guests served"}},
+	"wine":    {"name": "Elven Wine",       "price": 45, "cook_time": 5.0,  "tier": 3,
+			"unlock": {"by": "patron", "stat": "best_fame", "goal": 25,
+				"task": "A noble's steward may share it when your fame reaches 25",
+				"who": "A noble's steward"}},
+	"phoenix": {"name": "Phoenix Roast",    "price": 60, "cook_time": 9.0,  "tier": 3,
+			"unlock": {"by": "quest", "stat": "nobles", "goal": 8,
+				"title": "Noble Approval", "task": "Serve 8 nobles"}},
+	"feast":   {"name": "Dragonfire Feast", "price": 85, "cook_time": 12.0, "tier": 3,
+			"unlock": {"by": "quest", "stat": "dish:phoenix", "goal": 10,
+				"title": "A Feast for a Dragon", "task": "Serve 10 Phoenix Roasts"}},
 }
 const STARTER_RECIPES: Array[String] = ["ale", "stew", "boar"]
 const MAX_MENU: int = 4          # dishes on the menu at once
 const NOBLE_FAME: int = 25       # nobles start visiting at this much fame
+const PERFECT_DAY_GUESTS: int = 15   # guests needed for a "perfect day"
 
 # ---------------------------------------------------------------------
 # GAME STATE
@@ -88,12 +107,18 @@ var _last_minute_shown: int = -1
 var known_recipes: Array[String] = STARTER_RECIPES.duplicate()
 var menu: Array[String] = STARTER_RECIPES.duplicate()
 
+# Lifetime counters that quests and patron ideas check, e.g.
+# {"served": 41, "nobles": 3, "dish:stew": 9, "perfect_days": 1, "best_fame": 27}
+var stats: Dictionary = {}
+
 # Stats for the end-of-day summary (reset every morning).
 var today_income: int = 0
 var today_served: int = 0
 var today_walkouts: int = 0
 var today_turned_away: int = 0   # arrived but found no free table
 var today_nobles_served: int = 0
+var today_disappointed: int = 0   # left because nothing on the menu suited them
+var today_unlocked: Array[String] = []   # recipes earned today
 
 # Customers waiting for a Waiter to come and take their order.
 # Array[Customer] is a TYPED array: Godot will refuse anything that
@@ -134,6 +159,8 @@ func open_shop() -> void:
 	today_walkouts = 0
 	today_turned_away = 0
 	today_nobles_served = 0
+	today_disappointed = 0
+	today_unlocked.clear()
 	shop_opened.emit(day)
 
 
@@ -166,8 +193,11 @@ func reset() -> void:
 	today_walkouts = 0
 	today_turned_away = 0
 	today_nobles_served = 0
+	today_disappointed = 0
+	today_unlocked.clear()
 	known_recipes = STARTER_RECIPES.duplicate()
 	menu = STARTER_RECIPES.duplicate()
+	stats = {}
 	order_requests.clear()
 	order_queue.clear()
 
@@ -179,8 +209,8 @@ func reset() -> void:
 # dishes or guests mid-walk to store.
 #
 # The save is a JSON text file, so you can open it and read it.
-# main.gd supplies the furniture and staff; we add gold, fame, day and
-# recipes.
+# main.gd supplies the furniture and staff; we add gold, fame, day,
+# recipes and stats.
 # ---------------------------------------------------------------------
 func save_game(layout: Array, cooks: int, waiters: int) -> void:
 	var data: Dictionary = {
@@ -193,6 +223,7 @@ func save_game(layout: Array, cooks: int, waiters: int) -> void:
 		"waiters": waiters,
 		"recipes": known_recipes,
 		"menu": menu,
+		"stats": stats,
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file == null:
@@ -224,6 +255,10 @@ func load_game() -> Dictionary:
 	fame = int(parsed.get("fame", 0))
 	# Version 1 saves have no recipes, so they get the starter ones.
 	_load_recipes(parsed.get("recipes", []), parsed.get("menu", []))
+	var saved_stats = parsed.get("stats", {})
+	stats = saved_stats if typeof(saved_stats) == TYPE_DICTIONARY else {}
+	# Saves from before stats existed: count the fame they already have.
+	stats["best_fame"] = maxi(stat("best_fame"), fame)
 	gold_changed.emit(gold)
 	fame_changed.emit(fame)
 	return parsed
@@ -276,23 +311,62 @@ func next_order_request() -> Customer:
 
 
 # ---------------------------------------------------------------------
-# RECIPES AND THE MENU
-# These return a message for the HUD to show ("" = nothing to say).
+# STATS, QUESTS AND PATRON IDEAS
+# Recipes can't be bought. Each locked recipe has an "unlock" goal on a
+# lifetime stat; check_unlocks() hands out every recipe whose goal is met.
 # ---------------------------------------------------------------------
-func learn_recipe(id: String) -> String:
-	var recipe: Dictionary = RECIPES[id]
-	if known_recipes.has(id):
-		return ""
-	if not try_spend(recipe["learn"]):
-		return "Not enough gold to learn %s." % recipe["name"]
-	known_recipes.append(id)
-	# Straight onto the menu if there's a free slot.
-	if menu.size() < MAX_MENU:
-		menu.append(id)
-	recipes_changed.emit()
-	return "Learned %s!" % recipe["name"]
+func stat(key: String) -> int:
+	return int(stats.get(key, 0))   # int() because JSON loads numbers as decimals
 
 
+func add_stat(key: String, amount: int = 1) -> void:
+	stats[key] = stat(key) + amount
+
+
+# Called when a guest pays and leaves happy.
+func record_served(order_id: String, noble: bool) -> void:
+	add_stat("served")
+	add_stat("dish:" + order_id)
+	if noble:
+		add_stat("nobles")
+
+
+# Called once the last guest has left for the night.
+func finish_day() -> void:
+	if today_walkouts == 0 and today_served >= PERFECT_DAY_GUESTS:
+		add_stat("perfect_days")
+
+
+# How far along a locked recipe's quest or patron idea is (capped at its goal).
+func unlock_progress(id: String) -> int:
+	var unlock: Dictionary = RECIPES[id]["unlock"]
+	return mini(stat(unlock["stat"]), unlock["goal"])
+
+
+# Unlocks every recipe whose goal has been reached. Returns their IDs so
+# main.gd can announce them.
+func check_unlocks() -> Array[String]:
+	var unlocked: Array[String] = []
+	for id in RECIPES:
+		var recipe: Dictionary = RECIPES[id]
+		if known_recipes.has(id) or not recipe.has("unlock"):
+			continue
+		if stat(recipe["unlock"]["stat"]) >= recipe["unlock"]["goal"]:
+			known_recipes.append(id)
+			# Straight onto the menu if there's a free slot.
+			if menu.size() < MAX_MENU:
+				menu.append(id)
+			unlocked.append(id)
+			today_unlocked.append(id)
+	if not unlocked.is_empty():
+		recipes_changed.emit()
+	return unlocked
+
+
+# ---------------------------------------------------------------------
+# THE MENU
+# Returns a message for the HUD to show ("" = nothing to say).
+# ---------------------------------------------------------------------
 func toggle_menu(id: String) -> String:
 	if menu.has(id):
 		if menu.size() <= 1:
@@ -318,7 +392,8 @@ func pick_order(noble: bool) -> Dictionary:
 	for id in menu:
 		var recipe: Dictionary = RECIPES[id]
 		if (recipe["tier"] == 3) == noble:
-			choices.append(recipe)
+			# Add the ID so the guest can report which dish they ate.
+			choices.append(recipe.merged({"id": id}))
 	if choices.is_empty():
 		return {}
 	return choices.pick_random()
@@ -334,6 +409,7 @@ func noble_chance() -> float:
 
 func change_fame(amount: int) -> void:
 	fame = max(0, fame + amount)   # fame never goes below zero
+	stats["best_fame"] = maxi(stat("best_fame"), fame)
 	fame_changed.emit(fame)
 
 

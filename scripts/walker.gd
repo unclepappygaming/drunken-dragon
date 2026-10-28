@@ -22,6 +22,10 @@ var destination: Vector2i = TavernGrid.NO_CELL
 # Points still to walk to, in Main's space. Empty = standing still.
 var _path: Array[Vector2] = []
 var _leaving_by_door: bool = false
+# Set when walking to a spot outside the floor (the waiting line), where
+# there's no furniture and so no pathfinding.
+var _outside_target: Vector2
+var _going_outside: bool = false
 # True when no route exists right now. We try again on the next layout change.
 var _stuck: bool = false
 
@@ -39,6 +43,16 @@ func _setup_walker(tavern_grid: TavernGrid, start_pos: Vector2) -> void:
 func go_to_cell(cell: Vector2i) -> void:
 	destination = cell
 	_leaving_by_door = false
+	_going_outside = false
+	_plan_route()
+
+
+# Walk to a spot outside the tavern, like a place in the waiting line.
+func go_to_outside_spot(point: Vector2) -> void:
+	destination = TavernGrid.NO_CELL
+	_leaving_by_door = false
+	_going_outside = true
+	_outside_target = point
 	_plan_route()
 
 
@@ -46,6 +60,7 @@ func go_to_cell(cell: Vector2i) -> void:
 func go_out_door() -> void:
 	destination = TavernGrid.NO_CELL
 	_leaving_by_door = true
+	_going_outside = false
 	_plan_route()
 
 
@@ -83,9 +98,15 @@ func _walk(delta: float) -> bool:
 func _plan_route() -> void:
 	_path.clear()
 	_stuck = false
+	if _going_outside:
+		_path.append(_outside_target)
+		return
 	var start: Vector2i = current_cell()
 	if start == TavernGrid.NO_CELL:
-		start = TavernGrid.DOOR_CELL   # outside: come in through the door
+		# Outside: step in front of the door first, so we don't walk
+		# through the wall, then come in through the door.
+		_path.append(grid.door_position())
+		start = TavernGrid.DOOR_CELL
 	var goal: Vector2i = TavernGrid.DOOR_CELL if _leaving_by_door else destination
 	if goal == TavernGrid.NO_CELL:
 		return

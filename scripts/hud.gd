@@ -4,9 +4,17 @@
 # A CanvasLayer draws on top of the game world and never moves with it,
 # which is exactly what you want for menus and score bars.
 #
+# Layout (portrait, 720 x 1280):
+#   top bar:     gold, fame, clock, staff, and a hint/message line
+#   bottom bar:  [Build] [Staff] [Recipes] [Open Day]
+#   tray:        a row of options that pops up above the bottom bar when
+#                Build or Staff is tapped, and hides again when done
+#   cards:       the day summary (closes with Continue, so you can build
+#                between days) and the recipe book
+#
 # The UI is built in code here so you don't have to click together
-# dozens of nodes in the editor. Milestone 4 moves it into a proper
-# .tscn so you can restyle it visually.
+# dozens of nodes in the editor. A later milestone moves it into a
+# proper .tscn so you can restyle it visually.
 # =====================================================================
 class_name TavernHUD
 extends CanvasLayer
@@ -16,26 +24,41 @@ signal day_start_requested
 signal staff_change_requested(role: String, change: int)   # "cook"/"waiter", +1 or -1
 signal new_game_requested
 
+const BAR_HEIGHT: int = 120
+const TRAY_HEIGHT: int = 110
+const HIGHLIGHT := Color(1.0, 0.85, 0.45)   # tint for the selected button
+
 var _gold_label: Label
 var _fame_label: Label
 var _clock_label: Label
 var _staff_label: Label
 var _hint_label: Label
+
+# Bottom bar and trays
+var _build_button: Button
+var _staff_button: Button
+var _day_button: Button
+var _build_tray: Control
+var _staff_tray: Control
+var _tool_buttons: Dictionary = {}   # build type -> its tray button
+var _open_tray: String = ""          # "build", "staff" or ""
+
+# Cards
 var _summary_panel: PanelContainer
 var _summary_label: Label
-var _summary_button: Button
 var _new_game_button: Button
 var _new_game_armed: bool = false   # true after the first tap
 var _recipe_panel: PanelContainer
 var _recipe_header: Label
 var _recipe_list: VBoxContainer
 
-var _current_hint: String = "Tap a build button to place furniture."
+var _current_hint: String = "Drag to look around. Pinch to zoom."
 var _message_time_left: float = 0.0
 
 
 func _ready() -> void:
 	_build_top_bar()
+	_build_trays()
 	_build_bottom_bar()
 	_build_summary_panel()
 	_build_recipe_panel()
@@ -65,23 +88,30 @@ func _process(delta: float) -> void:
 # ---------------------------------------------------------------------
 # Public functions main.gd calls
 # ---------------------------------------------------------------------
-func show_message(text: String) -> void:
+func show_message(text: String, seconds: float = 2.0) -> void:
 	_hint_label.text = text
-	_message_time_left = 2.0
+	_message_time_left = seconds
 
 
 func set_staff(cooks: int, waiters: int, wages: int) -> void:
 	_staff_label.text = "Cooks %d  Waiters %d  Wages %dg/day" % [cooks, waiters, wages]
 
 
-# allow_new_game shows a "New Game" button under the main one.
-func show_summary(text: String, button_text: String, allow_new_game: bool = false) -> void:
+# The summary card. Continue just closes it; the day starts from the
+# Open Day button, so you can build and hire first.
+func show_summary(text: String, allow_new_game: bool = false) -> void:
 	_summary_label.text = text
-	_summary_button.text = button_text
 	_new_game_button.visible = allow_new_game
 	_new_game_armed = false
 	_new_game_button.text = "New Game"
+	_recipe_panel.visible = false
 	_summary_panel.visible = true
+
+
+# The fourth bottom button: "Open Day 3" between days, greyed out while open.
+func set_day_button(text: String, enabled: bool) -> void:
+	_day_button.text = text
+	_day_button.disabled = not enabled
 
 
 # ---------------------------------------------------------------------
@@ -106,37 +136,63 @@ func _on_shop_opened(day: int) -> void:
 	_clock_label.text = "Day %d   %02d:00" % [day, GameManager.OPEN_HOUR]
 
 
-func _on_build_button(type: String) -> void:
+# Build and Staff open their tray; tapping the same one again closes it.
+func _on_tray_button(tray: String) -> void:
+	_set_tray("" if _open_tray == tray else tray)
+
+
+func _set_tray(tray: String) -> void:
+	_open_tray = tray
+	_build_tray.visible = tray == "build"
+	_staff_tray.visible = tray == "staff"
+	_build_button.modulate = HIGHLIGHT if tray == "build" else Color.WHITE
+	_staff_button.modulate = HIGHLIGHT if tray == "staff" else Color.WHITE
+	# Leaving the build tray always stops building.
+	if tray != "build":
+		_select_tool("")
+	if tray == "build":
+		_set_hint("Pick something to build, then tap a square.")
+	elif tray == "staff":
+		_set_hint("Hire and fire staff between days.")
+	else:
+		_set_hint("Drag to look around. Pinch to zoom.")
+
+
+func _select_tool(type: String) -> void:
 	build_selected.emit(type)
+	for tool in _tool_buttons:
+		_tool_buttons[tool].modulate = HIGHLIGHT if tool == type else Color.WHITE
 	match type:
-		"table":   _current_hint = "Tap a square: Table (50g)"
-		"kitchen": _current_hint = "Tap a square: Hearth (120g)"
-		"remove":  _current_hint = "Tap furniture to sell it (half price)"
-		_:         _current_hint = "Tap a build button to place furniture."
-	_hint_label.text = _current_hint
+		"table":   _set_hint("Tap a square: Table (50g)")
+		"kitchen": _set_hint("Tap a square: Hearth (120g)")
+		"remove":  _set_hint("Tap furniture to sell it (half price)")
+
+
+func _set_hint(text: String) -> void:
+	_current_hint = text
+	_hint_label.text = text
 	_message_time_left = 0.0
 
 
-func _on_summary_button() -> void:
+func _on_day_button() -> void:
 	_summary_panel.visible = false
+	_recipe_panel.visible = false
 	day_start_requested.emit()
 
 
-func _on_recipes_button() -> void:
+func _on_continue_button() -> void:
 	_summary_panel.visible = false
-	_recipe_panel.visible = true
+
+
+func _on_recipes_button() -> void:
+	_set_tray("")
+	_summary_panel.visible = false
+	_recipe_panel.visible = not _recipe_panel.visible
 	_refresh_recipes()
 
 
 func _on_recipes_back() -> void:
 	_recipe_panel.visible = false
-	_summary_panel.visible = true
-
-
-func _on_learn_pressed(id: String) -> void:
-	var message: String = GameManager.learn_recipe(id)
-	if message != "":
-		show_message(message)
 
 
 func _on_menu_toggle_pressed(id: String) -> void:
@@ -162,6 +218,35 @@ func _make_label(font_size: int) -> Label:
 	# Theme overrides change one property on one node, like inline CSS.
 	label.add_theme_font_size_override("font_size", font_size)
 	return label
+
+
+func _make_button(text: String, font_size: int, parent: Control, height: int = 100) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.add_theme_font_size_override("font_size", font_size)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.custom_minimum_size = Vector2(0, height)
+	parent.add_child(button)
+	return button
+
+
+# A solid background. The default panel is see-through, which is hard
+# to read over the busy floor. A StyleBoxFlat is a plain colored box.
+func _solid(panel: PanelContainer, color: Color = Color(0.14, 0.11, 0.09)) -> void:
+	var background := StyleBoxFlat.new()
+	background.bg_color = color
+	background.set_content_margin_all(12)
+	panel.add_theme_stylebox_override("panel", background)
+
+
+# Pins a panel across the bottom of the screen, `from_bottom` pixels up,
+# `height` pixels tall.
+func _pin_bottom(panel: Control, from_bottom: int, height: int) -> void:
+	panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	panel.offset_left = 0
+	panel.offset_right = 0
+	panel.offset_top = -(from_bottom + height)
+	panel.offset_bottom = -from_bottom
 
 
 func _build_top_bar() -> void:
@@ -203,33 +288,47 @@ func _build_top_bar() -> void:
 func _build_bottom_bar() -> void:
 	var panel := PanelContainer.new()
 	add_child(panel)
-	panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	panel.offset_left = 0
-	panel.offset_right = 0
-	panel.offset_top = -230
-	panel.offset_bottom = 0
+	_pin_bottom(panel, 0, BAR_HEIGHT)
+	_solid(panel)
 
-	var rows := VBoxContainer.new()
-	panel.add_child(rows)
+	var row := HBoxContainer.new()
+	panel.add_child(row)
+	_build_button = _make_button("Build", 28, row)
+	# .bind() attaches an extra argument, so one function can handle
+	# both buttons and still know which one was pressed.
+	_build_button.pressed.connect(_on_tray_button.bind("build"))
+	_staff_button = _make_button("Staff", 28, row)
+	_staff_button.pressed.connect(_on_tray_button.bind("staff"))
+	var recipes := _make_button("Recipes", 28, row)
+	recipes.pressed.connect(_on_recipes_button)
+	_day_button = _make_button("Open\nDay 1", 26, row)
+	_day_button.pressed.connect(_on_day_button)
 
-	# Top row: building. [button text, build type]
+
+func _build_trays() -> void:
+	# Build tray. [button text, build type]
+	var build_panel := PanelContainer.new()
+	add_child(build_panel)
+	_pin_bottom(build_panel, BAR_HEIGHT, TRAY_HEIGHT)
+	_solid(build_panel, Color(0.2, 0.16, 0.12))
+	_build_tray = build_panel
 	var build_row := HBoxContainer.new()
-	rows.add_child(build_row)
-	var build_buttons: Array = [
-		["Table\n50g", "table"],
-		["Hearth\n120g", "kitchen"],
-		["Sell", "remove"],
-		["Done", ""],
-	]
-	for entry in build_buttons:
-		var button := _make_button(entry[0], 26, build_row)
-		# .bind() attaches an extra argument, so one function can handle
-		# all four buttons and still know which one was pressed.
-		button.pressed.connect(_on_build_button.bind(entry[1]))
+	build_panel.add_child(build_row)
+	for entry in [["Table\n50g", "table"], ["Hearth\n120g", "kitchen"], ["Sell", "remove"]]:
+		var button := _make_button(entry[0], 24, build_row, 86)
+		button.pressed.connect(_select_tool.bind(entry[1]))
+		_tool_buttons[entry[1]] = button
+	var done := _make_button("Done", 24, build_row, 86)
+	done.pressed.connect(_set_tray.bind(""))
 
-	# Bottom row: staff. [button text, role, +1 hire / -1 let go]
+	# Staff tray. [button text, role, +1 hire / -1 let go]
+	var staff_panel := PanelContainer.new()
+	add_child(staff_panel)
+	_pin_bottom(staff_panel, BAR_HEIGHT, TRAY_HEIGHT)
+	_solid(staff_panel, Color(0.2, 0.16, 0.12))
+	_staff_tray = staff_panel
 	var staff_row := HBoxContainer.new()
-	rows.add_child(staff_row)
+	staff_panel.add_child(staff_row)
 	var staff_buttons: Array = [
 		["Hire Cook\n%dg/day" % GameManager.STAFF["cook"]["wage"], "cook", 1],
 		["Fire\nCook", "cook", -1],
@@ -237,19 +336,12 @@ func _build_bottom_bar() -> void:
 		["Fire\nWaiter", "waiter", -1],
 	]
 	for entry in staff_buttons:
-		var button := _make_button(entry[0], 22, staff_row)
+		var button := _make_button(entry[0], 21, staff_row, 86)
 		# You can bind more than one argument.
 		button.pressed.connect(staff_change_requested.emit.bind(entry[1], entry[2]))
 
-
-func _make_button(text: String, font_size: int, parent: Control) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.add_theme_font_size_override("font_size", font_size)
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.custom_minimum_size = Vector2(0, 105)
-	parent.add_child(button)
-	return button
+	_build_tray.visible = false
+	_staff_tray.visible = false
 
 
 func _build_summary_panel() -> void:
@@ -258,62 +350,45 @@ func _build_summary_panel() -> void:
 	_summary_panel.set_anchors_preset(Control.PRESET_CENTER)
 	_summary_panel.offset_left = -290
 	_summary_panel.offset_right = 290
-	_summary_panel.offset_top = -300
-	_summary_panel.offset_bottom = 300
+	_summary_panel.offset_top = -280
+	_summary_panel.offset_bottom = 280
 	# If the text needs more room, grow up and down evenly, staying centered.
 	_summary_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_summary_panel.visible = false
+	_solid(_summary_panel)
 
 	var vbox := VBoxContainer.new()
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 20)
+	vbox.add_theme_constant_override("separation", 18)
 	_summary_panel.add_child(vbox)
 
-	_summary_label = _make_label(27)
+	_summary_label = _make_label(26)
 	_summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	_summary_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(_summary_label)
 
-	_summary_button = Button.new()
-	_summary_button.add_theme_font_size_override("font_size", 34)
-	_summary_button.custom_minimum_size = Vector2(0, 110)
-	_summary_button.pressed.connect(_on_summary_button)
-	vbox.add_child(_summary_button)
+	var continue_button := _make_button("Continue", 30, vbox, 90)
+	continue_button.pressed.connect(_on_continue_button)
 
-	var recipes_button := Button.new()
-	recipes_button.text = "Menu & Recipes"
-	recipes_button.add_theme_font_size_override("font_size", 28)
-	recipes_button.custom_minimum_size = Vector2(0, 90)
-	recipes_button.pressed.connect(_on_recipes_button)
-	vbox.add_child(recipes_button)
-
-	_new_game_button = Button.new()
-	_new_game_button.add_theme_font_size_override("font_size", 24)
-	_new_game_button.custom_minimum_size = Vector2(0, 80)
+	_new_game_button = _make_button("New Game", 22, vbox, 70)
 	_new_game_button.pressed.connect(_on_new_game_button)
 	_new_game_button.visible = false
-	vbox.add_child(_new_game_button)
 
 
-# The recipe book: every dish, with a button to learn it or to put it on
-# (or take it off) today's menu. Opened from the between-days screen.
+# The recipe book: every dish, whether it's on today's menu, and for
+# locked ones, the quest or patron idea that unlocks it.
 func _build_recipe_panel() -> void:
 	_recipe_panel = PanelContainer.new()
 	add_child(_recipe_panel)
 	# FULL_RECT = stretch to all four edges, then pull in from top and
-	# bottom so the gold/fame bar and the build buttons stay visible.
+	# bottom so the gold/fame bar and the bottom bar stay visible.
 	_recipe_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_recipe_panel.offset_left = 10
 	_recipe_panel.offset_right = -10
 	_recipe_panel.offset_top = 155
-	_recipe_panel.offset_bottom = -235
+	_recipe_panel.offset_bottom = -(BAR_HEIGHT + 5)
 	_recipe_panel.visible = false
-	# The default panel is see-through; a long list reads better on a
-	# solid background. A StyleBoxFlat is a plain colored box.
-	var background := StyleBoxFlat.new()
-	background.bg_color = Color(0.14, 0.11, 0.09)
-	background.set_content_margin_all(12)
-	_recipe_panel.add_theme_stylebox_override("panel", background)
+	_solid(_recipe_panel)
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 12)
@@ -332,15 +407,11 @@ func _build_recipe_panel() -> void:
 	vbox.add_child(scroll)
 	_recipe_list = VBoxContainer.new()
 	_recipe_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_recipe_list.add_theme_constant_override("separation", 10)
+	_recipe_list.add_theme_constant_override("separation", 14)
 	scroll.add_child(_recipe_list)
 
-	var back := Button.new()
-	back.text = "Back"
-	back.add_theme_font_size_override("font_size", 28)
-	back.custom_minimum_size = Vector2(0, 90)
+	var back := _make_button("Close", 28, vbox, 80)
 	back.pressed.connect(_on_recipes_back)
-	vbox.add_child(back)
 
 
 # Rebuilds every row. Simple, and with nine recipes it's instant.
@@ -362,6 +433,7 @@ func _refresh_recipes() -> void:
 
 	for id in GameManager.RECIPES:
 		var recipe: Dictionary = GameManager.RECIPES[id]
+		var known: bool = GameManager.known_recipes.has(id)
 		var row := HBoxContainer.new()
 		_recipe_list.add_child(row)
 
@@ -369,27 +441,31 @@ func _refresh_recipes() -> void:
 		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(info)
 		var name_label := _make_label(26)
-		name_label.text = recipe["name"]
+		name_label.text = recipe["name"] if known else recipe["name"] + " (locked)"
+		name_label.modulate = Color.WHITE if known else Color(0.75, 0.75, 0.75)
 		info.add_child(name_label)
-		var who: String = "Common folk"
-		if recipe["tier"] == 3:
-			who = "Nobles only"
-			if GameManager.fame < GameManager.NOBLE_FAME:
-				who += " (from %d fame)" % GameManager.NOBLE_FAME
+		var who: String = "Nobles only" if recipe["tier"] == 3 else "Common folk"
 		var details := _make_label(20)
 		details.text = "%dg   %.1fs to cook   %s" % [recipe["price"], recipe["cook_time"], who]
 		details.modulate = Color(0.8, 0.8, 0.8)
 		info.add_child(details)
 
+		if not known:
+			# How to earn it, with progress, e.g. "Serve 12 Mushroom Stews (7/12)".
+			var unlock: Dictionary = recipe["unlock"]
+			var how := _make_label(20)
+			how.autowrap_mode = TextServer.AUTOWRAP_WORD
+			how.modulate = Color(1.0, 0.85, 0.5)
+			var lead: String = "Quest: %s. " % unlock["title"] if unlock["by"] == "quest" else "Patron idea: "
+			how.text = "%s%s (%d/%d)" % [lead, unlock["task"], GameManager.unlock_progress(id), unlock["goal"]]
+			info.add_child(how)
+			continue
+
 		var button := Button.new()
 		button.add_theme_font_size_override("font_size", 22)
-		button.custom_minimum_size = Vector2(180, 80)
-		if not GameManager.known_recipes.has(id):
-			button.text = "Learn\n%dg" % recipe["learn"]
-			button.pressed.connect(_on_learn_pressed.bind(id))
-		else:
-			var on_menu: bool = GameManager.menu.has(id)
-			button.text = "On menu" if on_menu else "Add to menu"
-			button.modulate = Color(0.6, 1.0, 0.6) if on_menu else Color.WHITE
-			button.pressed.connect(_on_menu_toggle_pressed.bind(id))
+		button.custom_minimum_size = Vector2(170, 76)
+		var on_menu: bool = GameManager.menu.has(id)
+		button.text = "On menu" if on_menu else "Add to menu"
+		button.modulate = Color(0.6, 1.0, 0.6) if on_menu else Color.WHITE
+		button.pressed.connect(_on_menu_toggle_pressed.bind(id))
 		row.add_child(button)

@@ -12,7 +12,9 @@ Each day runs from 09:00 to 21:00 (about two real minutes). Drag with one
 finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 
 - **Guests** come in, sit beside a free Table and call for a waiter. If no
-  table is free, they leave and you lose fame.
+  table is free, they wait in a **line outside the door** (up to 5) and take
+  the next table that frees up. If they wait too long, or the line is full,
+  they leave and you lose fame.
 - **Waiters** take orders, fetch finished dishes from a Hearth and carry them
   to the table.
 - **Cooks** work the Hearths. A Hearth only cooks while a cook stands at it.
@@ -20,16 +22,22 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
   lose fame. Happy guests pay and raise your fame.
 - More fame brings guests faster. At 25 fame, **nobles** (with gold crowns)
   start to arrive. They only order dishes marked "Nobles only".
+- **Recipes can't be bought.** Happy patrons share ideas, and quests (like
+  "serve 12 Mushroom Stews") teach you new dishes. The recipe book shows
+  every quest and your progress.
 
-Between days you can:
+The bottom bar has four buttons:
 
-- **Build or sell** furniture with the bottom buttons. You can't block the
-  doorway or wall anyone in.
-- **Hire or fire** staff. Wages are paid every night.
-- Open **Menu & Recipes** to learn new dishes and choose up to 4 for
-  tomorrow's menu.
+- **Build** opens a tray: Table, Hearth, Sell. You can't block the doorway
+  or wall anyone in.
+- **Staff** opens a tray to hire or fire cooks and waiters (between days
+  only). Wages are paid every night.
+- **Recipes** opens the recipe book: pick up to 4 dishes for the menu and
+  check your quests.
+- **Open Day** starts the next day. The end-of-day summary closes with
+  Continue, so you can build and hire first.
 
-The game saves automatically between days. **New Game** on the day screen
+The game saves automatically between days. **New Game** on the day summary
 erases the save (it asks twice).
 
 ## Opening the project
@@ -64,6 +72,9 @@ All art is placeholder shapes drawn in code, so the scripts are the whole game:
 2. ✅ **Staff, pathfinding, saving**
 3. ✅ **Recipes, daily menu, nobles**, plus a camera: drag to look around,
    pinch (or mouse wheel) to zoom
+   - ✅ Recipes earned through quests and patron ideas instead of bought
+   - ✅ Waiting line outside the door when the tavern is full
+   - ✅ Compact bottom bar with Build and Staff trays
 4. ⬜ **Balance pass**
    - Busy-hour rushes so a well-staffed tavern still feels stretched
    - Slow down fame growth from nobles (it can jump 30 → 80 in two days)
