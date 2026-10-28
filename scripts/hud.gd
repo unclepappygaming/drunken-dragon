@@ -10,7 +10,8 @@
 #   tray:        a row of options that pops up above the bottom bar when
 #                Build or Staff is tapped, and hides again when done
 #   cards:       the day summary (closes with Continue, so you can build
-#                between days), the recipe book and the expansion card
+#                between days), the recipe book, the expansion card and
+#                the "plan the day" card for Noble Banquets
 #
 # The UI is built in code here so you don't have to click together
 # dozens of nodes in the editor. A later milestone moves it into a
@@ -20,7 +21,7 @@ class_name TavernHUD
 extends CanvasLayer
 
 signal build_selected(type: String)     # "table", "kitchen", "remove" or ""
-signal day_start_requested
+signal day_start_requested(banquet: bool)
 signal staff_change_requested(role: String, change: int)   # "cook"/"waiter", +1 or -1
 signal new_game_requested
 signal expand_requested
@@ -56,9 +57,16 @@ var _recipe_list: VBoxContainer
 var _expand_panel: PanelContainer
 var _expand_label: Label
 var _expand_button: Button
+var _plan_panel: PanelContainer
+var _plan_label: Label
+var _banquet_button: Button
 
 var _current_hint: String = "Drag to look around. Pinch to zoom."
 var _message_time_left: float = 0.0
+# Important news (shown for more than 2 seconds) waits its turn here
+# instead of being cut off by the next message. Each entry: [text, seconds].
+var _news_queue: Array = []
+var _showing_news: bool = false
 
 
 func _ready() -> void:
@@ -68,6 +76,7 @@ func _ready() -> void:
 	_build_summary_panel()
 	_build_recipe_panel()
 	_build_expand_panel()
+	_build_plan_panel()
 
 	# CONNECTING SIGNALS: "when GameManager emits gold_changed, run my
 	# _on_gold_changed function". The signal passes along the new amount.
@@ -89,14 +98,30 @@ func _process(delta: float) -> void:
 	# Temporary messages ("Not enough gold!") fade back to the hint.
 	if _message_time_left > 0.0:
 		_message_time_left -= delta
-		if _message_time_left <= 0.0:
-			_hint_label.text = _current_hint
+		if _message_time_left > 0.0:
+			return
+		_hint_label.text = _current_hint
+		_showing_news = false
+	# Then any news that was waiting gets its turn.
+	if not _news_queue.is_empty():
+		var next: Array = _news_queue.pop_front()
+		_showing_news = true
+		_hint_label.text = next[0]
+		_message_time_left = next[1]
 
 
 # ---------------------------------------------------------------------
 # Public functions main.gd calls
 # ---------------------------------------------------------------------
 func show_message(text: String, seconds: float = 2.0) -> void:
+	var is_news: bool = seconds > 2.0
+	if _showing_news and _message_time_left > 0.0:
+		if is_news:
+			_news_queue.append([text, seconds])
+			return
+		# A quick message cuts in; the news comes back right after it.
+		_news_queue.push_front([_hint_label.text, maxf(_message_time_left, 2.0)])
+	_showing_news = is_news
 	_hint_label.text = text
 	_message_time_left = seconds
 
@@ -183,6 +208,10 @@ func _select_tool(type: String) -> void:
 
 
 func _set_hint(text: String) -> void:
+	# Don't lose news that's on screen; show it again after.
+	if _showing_news and _message_time_left > 0.0:
+		_news_queue.push_front([_hint_label.text, maxf(_message_time_left, 2.0)])
+	_showing_news = false
 	_current_hint = text
 	_hint_label.text = text
 	_message_time_left = 0.0
@@ -192,7 +221,34 @@ func _on_day_button() -> void:
 	_summary_panel.visible = false
 	_recipe_panel.visible = false
 	_expand_panel.visible = false
-	day_start_requested.emit()
+	# Before nobles know about you, there's nothing to plan.
+	if not GameManager.banquet_unlocked():
+		day_start_requested.emit(false)
+		return
+	_show_plan()
+
+
+func _show_plan() -> void:
+	_set_tray("")
+	var noble_dishes: Array[String] = []
+	for id in GameManager.menu:
+		if GameManager.RECIPES[id]["tier"] == 3:
+			noble_dishes.append(GameManager.RECIPES[id]["name"])
+	var dishes: String = "Noble dishes on the menu: %s" % ", ".join(noble_dishes) if not noble_dishes.is_empty() \
+			else "No noble dishes on the menu! Add one in Recipes first."
+	_plan_label.text = "Plan Day %d\n\nHost a Noble Banquet?\n%d nobles arrive between %d:00 and %d:00. They skip the line, only order Nobles-only dishes, tip well and bring fame.\n\n%s" % [
+		GameManager.day + 1, GameManager.banquet_party_size(),
+		GameManager.BANQUET_START, GameManager.BANQUET_END, dishes,
+	]
+	var blocker: String = GameManager.banquet_blocker()
+	_banquet_button.text = "Host a Banquet (%dg)" % GameManager.BANQUET_COST if blocker == "" else blocker
+	_banquet_button.disabled = blocker != ""
+	_plan_panel.visible = true
+
+
+func _on_plan_chosen(banquet: bool) -> void:
+	_plan_panel.visible = false
+	day_start_requested.emit(banquet)
 
 
 func _on_expand_tool() -> void:
@@ -455,8 +511,8 @@ func _refresh_recipes() -> void:
 	var header: String = "Today's menu: %d of %d dishes" % [GameManager.menu.size(), GameManager.MAX_MENU]
 	if not GameManager.menu_suits(false):
 		header += "\nCommon folk have nothing to order!"
-	if GameManager.fame >= GameManager.NOBLE_FAME and not GameManager.menu_suits(true):
-		header += "\nNobles are visiting, but nothing fancy is on the menu."
+	if GameManager.banquet_unlocked() and not GameManager.menu_suits(true):
+		header += "\nBanquets need a Nobles-only dish on the menu."
 	_recipe_header.text = header
 
 	for id in GameManager.RECIPES:
@@ -548,3 +604,35 @@ func _refresh_expand_panel() -> void:
 	_expand_button.visible = true
 	_expand_button.text = "Build (%dg)" % next["cost"] if done else "Finish the quest first"
 	_expand_button.disabled = not done or GameManager.gold < next["cost"]
+
+
+# The "plan the day" card, shown by Open Day once banquets are unlocked.
+func _build_plan_panel() -> void:
+	_plan_panel = PanelContainer.new()
+	add_child(_plan_panel)
+	_plan_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_plan_panel.offset_left = -290
+	_plan_panel.offset_right = 290
+	_plan_panel.offset_top = -280
+	_plan_panel.offset_bottom = 280
+	_plan_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_plan_panel.visible = false
+	_solid(_plan_panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 16)
+	_plan_panel.add_child(vbox)
+
+	_plan_label = _make_label(25)
+	_plan_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_plan_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_plan_label)
+
+	_banquet_button = _make_button("Host a Banquet", 26, vbox, 86)
+	_banquet_button.modulate = HIGHLIGHT
+	_banquet_button.pressed.connect(_on_plan_chosen.bind(true))
+	var normal := _make_button("Open as usual", 26, vbox, 86)
+	normal.pressed.connect(_on_plan_chosen.bind(false))
+	var cancel := _make_button("Not yet", 22, vbox, 66)
+	cancel.pressed.connect(func(): _plan_panel.visible = false)

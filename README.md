@@ -3,8 +3,8 @@
 A cozy tavern-management game for phones, made with **Godot 4.4**.
 
 Build tables and hearths, hire cooks and waiters, learn new recipes, and keep
-your guests fed before their patience runs out. Win enough fame and nobles
-start visiting, but they only eat the fancy dishes.
+your guests fed before their patience runs out. Win enough fame and you can
+invite nobles to a banquet, but they only eat the fancy dishes.
 
 ## How to play
 
@@ -20,8 +20,11 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 - **Cooks** work the Hearths. A Hearth only cooks while a cook stands at it.
 - Every guest has a **patience bar**. If it runs out, they storm off and you
   lose fame. Happy guests pay and raise your fame.
-- More fame brings guests faster. At 25 fame, **nobles** (with gold crowns)
-  start to arrive. They only order dishes marked "Nobles only".
+- More fame brings guests faster. At 25 fame you can host **Noble Banquets**
+  (tap Open Day, then Host a Banquet, 150g, once every 3 days). A party of
+  nobles (gold crowns) arrives between 12:00 and 15:00. They skip the line,
+  only order "Nobles only" dishes and tip 50%. Each happy noble is +2 fame,
+  each unhappy one -3, and if they all leave happy you get +5 bonus fame.
 - **Recipes can't be bought.** Happy patrons share ideas, and quests (like
   "serve 12 Mushroom Stews") teach you new dishes. The recipe book shows
   every quest and your progress.
@@ -38,8 +41,9 @@ The bottom bar has four buttons:
   only). Wages are paid every night.
 - **Recipes** opens the recipe book: pick up to 4 dishes for the menu and
   check your quests.
-- **Open Day** starts the next day. The end-of-day summary closes with
-  Continue, so you can build and hire first.
+- **Open Day** starts the next day (once banquets are unlocked, it asks
+  whether to host one). The end-of-day summary closes with Continue, so you
+  can build and hire first.
 
 The game saves automatically between days. **New Game** on the day summary
 erases the save (it asks twice).
@@ -79,9 +83,11 @@ All art is placeholder shapes drawn in code, so the scripts are the whole game:
    - ✅ Recipes earned through quests and patron ideas instead of bought
    - ✅ Waiting line outside the door when the tavern is full
    - ✅ Compact bottom bar with Build and Staff trays
+   - ✅ Nobles come only to Noble Banquets you host (unlocked at 25 fame)
 4. ⬜ **Balance pass**
    - Busy-hour rushes so a well-staffed tavern still feels stretched
-   - Slow down fame growth from nobles (it can jump 30 → 80 in two days)
+   - Slow down fame growth: a busy 6-table tavern can gain ~28 fame in one
+     day, because every happy guest gives +1
    - Tune prices, cook times, patience and wages against real play
 5. ✅ **Bigger tavern**
    - ✅ Four floor expansions up to 12 x 14, each earned by a quest, then bought

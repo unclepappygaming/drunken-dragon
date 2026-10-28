@@ -143,6 +143,8 @@ func _process(delta: float) -> void:
 			_timer -= delta
 			if _timer <= 0.0:
 				var price: int = order["price"]
+				if is_noble:
+					price += floori(price * GameManager.NOBLE_TIP)   # nobles tip well
 				GameManager.earn(price)
 				_bubble = "+%dg" % price
 				_start_leaving("served")

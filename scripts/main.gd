@@ -6,7 +6,7 @@
 #   * moves the waiting line along whenever a table frees up
 #   * hires and lets go of staff (only between days)
 #   * tells the grid which build tool the HUD selected
-#   * decides which guests are nobles
+#   * runs Noble Banquets: invited nobles arrive at midday
 #   * frees tables, changes fame and records stats when guests leave
 #   * announces recipes and expansions earned from quests
 #   * builds expansions and keeps the camera fitted to the floor
@@ -38,6 +38,8 @@ const LINE_GAP: float = 46.0   # pixels between people in the line
 var _waiting_for_last_guests: bool = false
 # Guests waiting outside for a table, first in line first.
 var _line: Array[Customer] = []
+# On a banquet day: when each noble arrives, in game minutes after opening.
+var _noble_arrivals: Array[float] = []
 
 
 func _ready() -> void:
@@ -95,6 +97,13 @@ func _fit_camera() -> void:
 
 
 func _process(_delta: float) -> void:
+	# Banquet nobles arrive on their own schedule, separate from the
+	# spawn timer that brings everyone else.
+	if GameManager.is_open and not _noble_arrivals.is_empty() \
+			and GameManager.minutes_since_open >= _noble_arrivals[0]:
+		_noble_arrivals.pop_front()
+		_noble_arrives()
+
 	# After closing, wait until every guest has walked out the door.
 	# get_nodes_in_group asks for every node tagged "customers".
 	if _waiting_for_last_guests and get_tree().get_nodes_in_group("customers").is_empty():
@@ -102,12 +111,26 @@ func _process(_delta: float) -> void:
 		_show_day_summary()
 
 
-func _on_day_start_requested() -> void:
+func _on_day_start_requested(banquet: bool) -> void:
 	if GameManager.is_open or _waiting_for_last_guests:
 		return
-	GameManager.open_shop()
+	if banquet:
+		var blocker: String = GameManager.banquet_blocker()
+		if blocker != "" or not GameManager.try_spend(GameManager.BANQUET_COST):
+			hud.show_message(blocker if blocker != "" else "Not enough gold!")
+			return
+	GameManager.open_shop(banquet)
 	hud.set_day_button("Open", false)
 	spawn_timer.start(2.0)   # first guest arrives 2 seconds after opening
+	_noble_arrivals.clear()
+	if banquet:
+		# Spread the party evenly between BANQUET_START and BANQUET_END.
+		var party: int = GameManager.banquet_party_size()
+		var start: float = (GameManager.BANQUET_START - GameManager.OPEN_HOUR) * 60.0
+		var length: float = (GameManager.BANQUET_END - GameManager.BANQUET_START) * 60.0
+		for i in party:
+			_noble_arrivals.append(start + length * i / party)
+		hud.show_message("Banquet day! %d nobles will arrive from %d:00." % [party, GameManager.BANQUET_START], 4.0)
 
 
 func _on_build_selected(type: String) -> void:
@@ -118,7 +141,7 @@ func _on_build_selected(type: String) -> void:
 # Guests and the waiting line
 # ---------------------------------------------------------------------
 func _on_spawn_timer_timeout() -> void:
-	var noble: bool = randf() < GameManager.noble_chance()
+	var noble: bool = false   # nobles only come to banquets
 	var cell: Vector2i = grid.find_free_table()
 	# Nobody jumps the line: a free table goes to the line first.
 	if cell != TavernGrid.NO_CELL and _line.is_empty():
@@ -153,7 +176,23 @@ func _seat(customer: Customer, cell: Vector2i) -> void:
 	customer.take_table(cell)
 
 
-# The line runs left along the outside wall, starting beside the door.
+# An invited noble. Nobles don't queue: they get the next free table,
+# and go to the front of the line if there isn't one.
+func _noble_arrives() -> void:
+	if GameManager.today_banquet_nobles == 0:
+		hud.show_message("The nobles are arriving!", 3.0)
+	GameManager.today_banquet_nobles += 1
+	var noble: Customer = _spawn_customer(true)
+	var cell: Vector2i = grid.find_free_table()
+	if cell != TavernGrid.NO_CELL:
+		_seat(noble, cell)
+	else:
+		_line.insert(0, noble)
+		noble.wait_in_line(_line_spot(0))
+		_seat_from_line()   # moves everyone else back a place
+
+
+# The line runs along the outside wall, starting beside the door.
 func _line_spot(place: int) -> Vector2:
 	return grid.door_position() + grid.line_direction() * (60.0 + place * LINE_GAP)
 
@@ -185,11 +224,12 @@ func _on_customer_left(customer: Customer, _happy: bool) -> void:
 			GameManager.today_walkouts += 1
 			GameManager.change_fame(-3 if customer.is_noble else -2)
 		"no_dish":
+			# An invited noble with nothing to eat is an insult.
 			GameManager.today_disappointed += 1
-			GameManager.change_fame(-1)
+			GameManager.change_fame(-3 if customer.is_noble else -1)
 		"gave_up_line":
 			GameManager.today_turned_away += 1
-			GameManager.change_fame(-1)
+			GameManager.change_fame(-3 if customer.is_noble else -1)
 		# "closed": sent home at closing time, no fame change.
 
 	_announce_unlocks(GameManager.check_unlocks(), customer)
@@ -211,6 +251,10 @@ func _announce_unlocks(ids: Array[String], speaker: Customer) -> void:
 	var expansion_quest: String = GameManager.check_expansion_ready()
 	if expansion_quest != "":
 		hud.show_message("Quest done: %s! You can expand the tavern (Build > Expand)." % expansion_quest, 6.0)
+		GameManager.today_news.append("You can expand the tavern (Build > Expand).")
+	if GameManager.check_banquet_unlock():
+		hud.show_message("Nobles have heard of you! Host a Noble Banquet from Open Day.", 6.0)
+		GameManager.today_news.append("Nobles have heard of you! You can now host Noble Banquets.")
 
 
 func _on_expand_requested() -> void:
@@ -307,6 +351,14 @@ func _show_day_summary() -> void:
 			get_tree().get_nodes_in_group("waiters").size())
 	GameManager.pay_wages(wages)
 	GameManager.finish_day()
+	if GameManager.banquet_today:
+		var guests: int = GameManager.today_banquet_nobles
+		var happy: int = GameManager.today_nobles_served
+		if guests > 0 and happy == guests:
+			GameManager.change_fame(GameManager.BANQUET_BONUS_FAME)
+			GameManager.today_news.append("A triumphant banquet! All %d nobles left happy (+%d fame)." % [guests, GameManager.BANQUET_BONUS_FAME])
+		else:
+			GameManager.today_news.append("Banquet: %d of %d nobles left happy." % [happy, guests])
 	_announce_unlocks(GameManager.check_unlocks(), null)
 	_save_if_closed()
 
@@ -328,5 +380,7 @@ func _show_day_summary() -> void:
 		for id in GameManager.today_unlocked:
 			names.append(GameManager.RECIPES[id]["name"])
 		text += "\n\nNew recipes: %s" % ", ".join(names)
+	for line in GameManager.today_news:
+		text += "\n\n" + line
 	hud.show_summary(text, true)
 	hud.set_day_button("Open\nDay %d" % (GameManager.day + 1), true)

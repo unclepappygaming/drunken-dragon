@@ -89,7 +89,16 @@ const RECIPES: Dictionary = {
 }
 const STARTER_RECIPES: Array[String] = ["ale", "stew", "boar"]
 const MAX_MENU: int = 4          # dishes on the menu at once
-const NOBLE_FAME: int = 25       # nobles start visiting at this much fame
+# NOBLE BANQUETS: nobles only come when invited. At NOBLE_FAME you can
+# host a banquet (from the Open Day button): pay BANQUET_COST and a party
+# of nobles arrives between BANQUET_START and BANQUET_END (24h clock).
+const NOBLE_FAME: int = 25
+const BANQUET_COST: int = 150
+const BANQUET_EVERY: int = 3     # days between banquets
+const BANQUET_START: int = 12
+const BANQUET_END: int = 15
+const BANQUET_BONUS_FAME: int = 5   # when every noble leaves happy
+const NOBLE_TIP: float = 0.5        # nobles pay 50% on top
 const PERFECT_DAY_GUESTS: int = 15   # guests needed for a "perfect day"
 
 # Making the tavern bigger, one step at a time. Each step's quest has to
@@ -134,6 +143,9 @@ var today_turned_away: int = 0   # arrived but found no free table
 var today_nobles_served: int = 0
 var today_disappointed: int = 0   # left because nothing on the menu suited them
 var today_unlocked: Array[String] = []   # recipes earned today
+var today_news: Array[String] = []       # other news for the day summary
+var banquet_today: bool = false
+var today_banquet_nobles: int = 0       # nobles who came to today's banquet
 
 # Customers waiting for a Waiter to come and take their order.
 # Array[Customer] is a TYPED array: Godot will refuse anything that
@@ -164,8 +176,12 @@ func _process(delta: float) -> void:
 		shop_closed.emit(day)
 
 
-func open_shop() -> void:
+func open_shop(banquet: bool = false) -> void:
 	day += 1
+	banquet_today = banquet
+	today_banquet_nobles = 0
+	if banquet:
+		stats["last_banquet_day"] = day
 	is_open = true
 	minutes_since_open = 0.0
 	_last_minute_shown = -1
@@ -176,6 +192,7 @@ func open_shop() -> void:
 	today_nobles_served = 0
 	today_disappointed = 0
 	today_unlocked.clear()
+	today_news.clear()
 	shop_opened.emit(day)
 
 
@@ -210,6 +227,9 @@ func reset() -> void:
 	today_nobles_served = 0
 	today_disappointed = 0
 	today_unlocked.clear()
+	today_news.clear()
+	banquet_today = false
+	today_banquet_nobles = 0
 	known_recipes = STARTER_RECIPES.duplicate()
 	menu = STARTER_RECIPES.duplicate()
 	stats = {}
@@ -458,12 +478,43 @@ func pick_order(noble: bool) -> Dictionary:
 	return choices.pick_random()
 
 
-# The chance that a new guest is a noble: none below NOBLE_FAME, then
-# 10%, growing with fame up to 35%.
-func noble_chance() -> float:
-	if fame < NOBLE_FAME:
-		return 0.0
-	return minf(0.35, 0.1 + (fame - NOBLE_FAME) * 0.01)
+# ---------------------------------------------------------------------
+# NOBLE BANQUETS
+# ---------------------------------------------------------------------
+# Unlocked for good once you've ever reached NOBLE_FAME.
+func banquet_unlocked() -> bool:
+	return stat("best_fame") >= NOBLE_FAME
+
+
+# The first day you can host the next banquet.
+func next_banquet_day() -> int:
+	if stat("last_banquet_day") == 0:
+		return 1
+	return stat("last_banquet_day") + BANQUET_EVERY
+
+
+# Why you can't host a banquet tomorrow, or "" if you can.
+func banquet_blocker() -> String:
+	if not banquet_unlocked():
+		return "Reach %d fame to invite nobles" % NOBLE_FAME
+	if day + 1 < next_banquet_day():
+		return "Next banquet: Day %d" % next_banquet_day()
+	if gold < BANQUET_COST:
+		return "Not enough gold (%dg)" % BANQUET_COST
+	return ""
+
+
+# 3 nobles at 25 fame, one more for every 10 fame after that, up to 8.
+func banquet_party_size() -> int:
+	return mini(8, 3 + floori(maxi(0, fame - NOBLE_FAME) / 10.0))
+
+
+# Returns true the first time banquets become available (to announce it once).
+func check_banquet_unlock() -> bool:
+	if not banquet_unlocked() or stat("banquet_announced") > 0:
+		return false
+	stats["banquet_announced"] = 1
+	return true
 
 
 func change_fame(amount: int) -> void:
