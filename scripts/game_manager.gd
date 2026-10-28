@@ -39,8 +39,9 @@ const SAVE_PATH: String = "user://save.json"
 # Bump this if the save format ever changes, so old saves can be handled.
 # Version 2 added recipes and the menu, version 3 lifetime stats (for
 # quests), version 4 expansions and the door, version 5 fame milestones,
-# version 6 named staff with types and looks. Older saves still load.
-const SAVE_VERSION: int = 6
+# version 6 named staff with types and looks, version 7 the kitchen zone.
+# Older saves still load.
+const SAVE_VERSION: int = 7
 
 # Everything the player can build. The key ("table") is the ID the
 # other scripts use; the inner Dictionary holds its details.
@@ -299,7 +300,7 @@ func reset() -> void:
 # main.gd supplies the furniture, door and staff (a list of profiles);
 # we add gold, fame, day, recipes, stats and expansions.
 # ---------------------------------------------------------------------
-func save_game(layout: Array, door: Array, staff: Array) -> void:
+func save_game(layout: Array, door: Array, kitchen: Array, staff: Array) -> void:
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"day": day,
@@ -307,6 +308,7 @@ func save_game(layout: Array, door: Array, staff: Array) -> void:
 		"fame": fame,
 		"furniture": layout,
 		"door": door,
+		"kitchen": kitchen,
 		"expansions": expansions_built,
 		"staff": staff,
 		"recipes": known_recipes,

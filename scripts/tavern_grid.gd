@@ -13,8 +13,12 @@
 #   * handles taps to build/remove furniture and move the door
 #   * finds walking routes around the furniture (pathfinding)
 #   * tracks which tables are taken
-#   * runs the Hearths: each one cooks one order at a time, but only
-#     while a Cook stands at it, then leaves the plate for a Waiter
+#   * holds the KITCHEN: a zone 2 squares deep. Cooks work from the back
+#     row (the aisle), facing the room; the front row is the line, with
+#     Hearths and, at the right end, the expo counter ("the pass")
+#   * runs the Hearths: each cooks one order at a time while its cook
+#     stands behind it; the cook then carries the plate to the pass,
+#     where waiters pick it up from the front
 # =====================================================================
 class_name TavernGrid
 extends Node2D
@@ -57,15 +61,32 @@ var door_index: int = 4
 # through it, so it can never be built on.
 var door_cell: Vector2i = Vector2i(4, START_ROWS - 1)
 
-# Vector2i(column, row) -> furniture ID ("table" / "kitchen")
+# THE KITCHEN: kitchen_pos is the aisle's left square. The zone is
+# kitchen_width squares wide and KITCHEN_DEPTH (2) deep:
+#   row kitchen_pos.y      the aisle: cooks stand here, facing the room
+#   row kitchen_pos.y + 1  the line: Hearths, gaps, and the pass (expo)
+#                          at the right end
+const KITCHEN_DEPTH: int = 2
+const KITCHEN_START_WIDTH: int = 4
+const KITCHEN_MAX_WIDTH: int = 8
+const KITCHEN_WIDEN_COST: int = 150
+const EXPO_CAPACITY: int = 3      # plates the pass can hold
+# Walking through the kitchen counts as this many squares, so guests and
+# waiters go around it unless there's truly no other way.
+const KITCHEN_WEIGHT: float = 8.0
+var kitchen_pos: Vector2i = Vector2i(4, 0)
+var kitchen_width: int = KITCHEN_START_WIDTH
+# Plates waiting on the pass, oldest first: {"guest": Customer, "taker": Waiter or null}
+var expo_plates: Array = []
+
+# Vector2i(column, row) -> furniture ID ("table", "kitchen" for a Hearth,
+# or "expo" for the pass, which comes with the kitchen)
 var furniture: Dictionary = {}
 # table cell -> the Customer sitting there, or null if free
 var table_owner: Dictionary = {}
 # hearth cell -> {
 #   "cook":        the Cook working it, or null
 #   "job":         {} when not cooking, or {"customer", "time_left", "total"}
-#   "plate_for":   the guest whose finished dish is waiting here, or null
-#   "plate_taker": the Waiter on their way to fetch it, or null
 # }
 var hearths: Dictionary = {}
 
@@ -86,10 +107,13 @@ func _ready() -> void:
 	_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
 	_apply_size()
 
-	# A free starter layout so Day 1 works right away.
-	_place(Vector2i(1, 2), "table")
-	_place(Vector2i(4, 2), "table")
-	_place(Vector2i(6, 6), "kitchen")
+	# A free starter layout so Day 1 works right away: the kitchen along
+	# the back wall with one Hearth, and two tables.
+	_place(expo_cell(), "expo")
+	_place(Vector2i(5, 1), "kitchen")
+	_place(Vector2i(1, 3), "table")
+	_place(Vector2i(3, 5), "table")
+	_mark_kitchen()
 
 
 # The camera tells us about taps (drags just move the view), already
@@ -156,6 +180,7 @@ func _apply_size() -> void:
 	_astar.update()
 	for cell in furniture:
 		_astar.set_point_solid(cell, true)
+	_mark_kitchen()
 	_rebuild_front_walls()
 	queue_redraw()
 
@@ -185,28 +210,24 @@ func _side_of(cell: Vector2i) -> String:
 
 
 func _process(delta: float) -> void:
+	# Plates nobody will eat any more get cleared off the pass.
+	expo_plates = expo_plates.filter(func(plate): return _wants_food(plate["guest"]))
+
 	for cell in hearths:
 		# Dictionaries are shared, not copied: changing `h` changes hearths[cell].
 		var h: Dictionary = hearths[cell]
 
-		# A plate nobody will eat any more gets cleared away.
-		if not _wants_food(h["plate_for"]):
-			h["plate_for"] = null
-			h["plate_taker"] = null
-
-		# The fire only cooks with a cook standing at it.
+		# The fire only cooks with a cook standing behind it.
 		var cook = h["cook"]
 		if not is_instance_valid(cook) or not cook.is_at_hearth():
 			continue
 
 		var job: Dictionary = h["job"]
 		if job.is_empty():
-			# Only start the next dish once the last plate has been fetched.
-			if h["plate_for"] == null:
-				var next: Customer = _pop_next_order()
-				if next != null:
-					var cook_time: float = next.order["cook_time"]
-					h["job"] = {"customer": next, "time_left": cook_time, "total": cook_time}
+			var next: Customer = _pop_next_order()
+			if next != null:
+				var cook_time: float = next.order["cook_time"]
+				h["job"] = {"customer": next, "time_left": cook_time, "total": cook_time}
 		else:
 			# The guest may have stormed out while we cooked. Bin the dish
 			# and move on to the next order instead of finishing it.
@@ -217,12 +238,14 @@ func _process(delta: float) -> void:
 			job["time_left"] -= delta * cook.cook_speed(job["customer"].order)
 			if job["time_left"] <= 0.0:
 				job["customer"].price_bonus += cook.portion_bonus()
-				h["plate_for"] = job["customer"]   # ready for a waiter
+				cook.take_dish(job["customer"])   # they carry it to the pass
 				h["job"] = {}
 	queue_redraw()
-	# Hearths show cooking progress and plates, so redraw them every frame.
+	# Hearths and the pass show progress and plates, so redraw them every frame.
 	for cell in hearths:
 		_props[cell].queue_redraw()
+	if _props.has(expo_cell()):
+		_props[expo_cell()].queue_redraw()
 
 
 # ---------------------------------------------------------------------
@@ -274,6 +297,13 @@ func find_path(from_cell: Vector2i, to_cell: Vector2i) -> Array[Vector2i]:
 # is using (so two people don't stand on top of each other).
 # `asker` is left out when checking who is using which square.
 func access_cell(furniture_cell: Vector2i, from_pos: Vector2, asker: Node = null) -> Vector2i:
+	# Kitchen pieces have fixed spots: cooks always stand behind the line,
+	# waiters always collect from in front of the pass.
+	match furniture.get(furniture_cell, ""):
+		"kitchen":
+			return furniture_cell + Vector2i(0, -1)
+		"expo":
+			return expo_back() if asker is Cook else expo_front()
 	var start: Vector2i = cell_at_world(from_pos)
 	if start == NO_CELL:
 		start = door_cell
@@ -283,7 +313,8 @@ func access_cell(furniture_cell: Vector2i, from_pos: Vector2, asker: Node = null
 	var best_score: float = INF
 	for side in SIDES:
 		var spot: Vector2i = furniture_cell + side
-		if not _in_bounds(spot) or furniture.has(spot):
+		# Nobody sits in the kitchen or on the waiters' pickup spot.
+		if not _in_bounds(spot) or furniture.has(spot) or in_kitchen(spot) or spot == expo_front():
 			continue
 		var route: Array[Vector2i] = find_path(start, spot)
 		if route.is_empty():
@@ -301,15 +332,18 @@ func access_cell(furniture_cell: Vector2i, from_pos: Vector2, asker: Node = null
 # square someone else is using, and preferably not beside a table, since
 # that's where guests sit. NO_CELL if there's nowhere to go.
 func standby_cell(asker: Node) -> Vector2i:
-	var anchor: Vector2 = Vector2(cols, rows) / 2.0
-	if not hearths.is_empty():
-		anchor = Vector2(hearths.keys()[0])
+	# Spare cooks wait in the kitchen aisle; waiters wait near the pass,
+	# outside the kitchen.
+	var cook: bool = asker is Cook
+	var anchor: Vector2 = Vector2(expo_front())
 	var in_use: Dictionary = _cells_in_use(asker)
 	var choices: Array = []
 	for x in cols:
 		for y in rows:
 			var spot := Vector2i(x, y)
-			if furniture.has(spot) or spot == door_cell or in_use.has(spot):
+			if furniture.has(spot) or spot == door_cell or in_use.has(spot) or spot == expo_front():
+				continue
+			if cook != (in_kitchen(spot) and spot.y == kitchen_pos.y):
 				continue
 			var score: float = Vector2(spot).distance_to(anchor)
 			for side in SIDES:
@@ -361,33 +395,215 @@ func release_hearth(cook: Cook) -> void:
 			hearths[cell]["cook"] = null
 
 
-# A Waiter asks for a finished plate nobody is fetching yet.
-func claim_ready_plate(waiter: Waiter) -> Vector2i:
-	for cell in hearths:
-		var h: Dictionary = hearths[cell]
-		if _wants_food(h["plate_for"]) and not is_instance_valid(h["plate_taker"]):
-			h["plate_taker"] = waiter
-			return cell
-	return NO_CELL
+# ---------------------------------------------------------------------
+# The pass (expo counter)
+# ---------------------------------------------------------------------
+func expo_cell() -> Vector2i:
+	return kitchen_pos + Vector2i(kitchen_width - 1, 1)
+
+
+# Where a cook stands to put a plate down, and where a waiter picks it up.
+func expo_back() -> Vector2i:
+	return expo_cell() + Vector2i(0, -1)
+
+
+func expo_front() -> Vector2i:
+	return expo_cell() + Vector2i(0, 1)
+
+
+func expo_has_room() -> bool:
+	return expo_plates.size() < EXPO_CAPACITY
+
+
+# A cook sets a finished dish down on the pass.
+func put_on_expo(guest: Customer) -> void:
+	expo_plates.append({"guest": guest, "taker": null})
+
+
+# A Waiter asks for a plate on the pass that nobody is fetching yet.
+func claim_ready_plate(waiter: Waiter) -> bool:
+	for plate in expo_plates:
+		if _wants_food(plate["guest"]) and not is_instance_valid(plate["taker"]):
+			plate["taker"] = waiter
+			return true
+	return false
 
 
 # Is the plate this waiter claimed still there?
-func is_plate_waiting(cell: Vector2i, waiter: Waiter) -> bool:
-	return hearths.has(cell) and hearths[cell]["plate_taker"] == waiter \
-			and _wants_food(hearths[cell]["plate_for"])
+func is_plate_waiting(waiter: Waiter) -> bool:
+	return expo_plates.any(func(plate): return plate["taker"] == waiter and _wants_food(plate["guest"]))
 
 
-# The waiter takes the plate. Returns the guest it's for, or null.
-func pick_up_plate(cell: Vector2i) -> Customer:
-	if not hearths.has(cell):
-		return null
-	var h: Dictionary = hearths[cell]
-	var guest = h["plate_for"]
-	h["plate_for"] = null
-	h["plate_taker"] = null
-	if not _wants_food(guest):
-		return null
-	return guest
+# The waiter takes their plate. Returns the guest it's for, or null.
+func pick_up_plate(waiter: Waiter) -> Customer:
+	for plate in expo_plates:
+		if plate["taker"] == waiter:
+			expo_plates.erase(plate)
+			if _wants_food(plate["guest"]):
+				return plate["guest"]
+			return null
+	return null
+
+
+# ---------------------------------------------------------------------
+# The kitchen zone
+# ---------------------------------------------------------------------
+func kitchen_rect() -> Rect2i:
+	return Rect2i(kitchen_pos, Vector2i(kitchen_width, KITCHEN_DEPTH))
+
+
+func in_kitchen(cell: Vector2i) -> bool:
+	return kitchen_rect().has_point(cell)
+
+
+# The front row of the kitchen, where Hearths go (the pass is there too).
+func on_line(cell: Vector2i) -> bool:
+	return in_kitchen(cell) and cell.y == kitchen_pos.y + 1
+
+
+# The kitchen as plain data for the save file.
+func get_kitchen() -> Array:
+	return [kitchen_pos.x, kitchen_pos.y, kitchen_width]
+
+
+# Makes the kitchen squares expensive to walk through (see KITCHEN_WEIGHT).
+func _mark_kitchen() -> void:
+	for x in cols:
+		for y in rows:
+			_astar.set_point_weight_scale(Vector2i(x, y), KITCHEN_WEIGHT if in_kitchen(Vector2i(x, y)) else 1.0)
+	queue_redraw()
+
+
+# Checks whether a kitchen could go at `pos` with `width`, given the
+# furniture in `solid` (with the current kitchen's pieces already taken
+# out). Returns "" if it fits, otherwise what's wrong.
+func _kitchen_fits(pos: Vector2i, width: int, solid: Dictionary) -> String:
+	var zone := Rect2i(pos, Vector2i(width, KITCHEN_DEPTH))
+	if zone.position.x < 0 or zone.position.y < 0 or zone.end.x > cols or zone.end.y > rows:
+		return "The kitchen doesn't fit there."
+	var front: Vector2i = pos + Vector2i(width - 1, 2)
+	if not _in_bounds(front):
+		return "Waiters need room in front of the pass."
+	for x in range(zone.position.x, zone.end.x):
+		for y in range(zone.position.y, zone.end.y):
+			var spot := Vector2i(x, y)
+			if spot == door_cell:
+				return "The kitchen can't cover the doorway."
+			if solid.has(spot):
+				return "Clear the tables out of the way first."
+	if solid.has(front) or front == door_cell:
+		return "Waiters need room in front of the pass."
+	return ""
+
+
+# The kitchen's pieces (Hearths and the pass) as they'd be at a new
+# position or width: furniture minus the old kitchen, plus the new one.
+func _layout_with_kitchen(pos: Vector2i, width: int) -> Dictionary:
+	var solid: Dictionary = {}
+	for cell in furniture:
+		if furniture[cell] == "table":
+			solid[cell] = "table"
+	for cell in hearths:
+		var slot: int = cell.x - kitchen_pos.x
+		solid[Vector2i(pos.x + slot, pos.y + 1)] = "kitchen"
+	solid[pos + Vector2i(width - 1, 1)] = "expo"
+	return solid
+
+
+# Moves the whole kitchen (Hearths, pass and all) so its aisle starts at
+# `cell`. Only between days, like moving the door.
+func _try_move_kitchen(cell: Vector2i) -> void:
+	if GameManager.is_open or not get_tree().get_nodes_in_group("customers").is_empty():
+		build_message.emit("Move the kitchen after closing time.")
+		return
+	if cell == kitchen_pos:
+		build_message.emit("The kitchen is already here.")
+		return
+	var tables: Dictionary = {}
+	for spot in furniture:
+		if furniture[spot] == "table":
+			tables[spot] = true
+	var problem: String = _kitchen_fits(cell, kitchen_width, tables)
+	if problem != "":
+		build_message.emit(problem)
+		return
+	var solid: Dictionary = _layout_with_kitchen(cell, kitchen_width)
+	if not _people_clear_of(solid) or not _layout_works(solid, door_cell, cell, kitchen_width):
+		build_message.emit("That would block someone's way!")
+		return
+	_rebuild_kitchen(cell, kitchen_width)
+	layout_changed.emit()
+	build_message.emit("Moved the kitchen.")
+
+
+# One more square of width on the right; the pass moves to the new end.
+func try_widen_kitchen() -> void:
+	if GameManager.is_open or not get_tree().get_nodes_in_group("customers").is_empty():
+		build_message.emit("Widen the kitchen after closing time.")
+		return
+	if kitchen_width >= KITCHEN_MAX_WIDTH:
+		build_message.emit("The kitchen is as wide as it gets.")
+		return
+	var tables: Dictionary = {}
+	for spot in furniture:
+		if furniture[spot] == "table":
+			tables[spot] = true
+	var problem: String = _kitchen_fits(kitchen_pos, kitchen_width + 1, tables)
+	if problem != "":
+		build_message.emit(problem.replace("doesn't fit there", "has no room to grow"))
+		return
+	var solid: Dictionary = _layout_with_kitchen(kitchen_pos, kitchen_width + 1)
+	if not _people_clear_of(solid) or not _layout_works(solid, door_cell, kitchen_pos, kitchen_width + 1):
+		build_message.emit("That would block someone's way!")
+		return
+	if not GameManager.try_spend(KITCHEN_WIDEN_COST):
+		build_message.emit("Not enough gold (%dg)." % KITCHEN_WIDEN_COST)
+		return
+	_rebuild_kitchen(kitchen_pos, kitchen_width + 1)
+	layout_changed.emit()
+	build_message.emit("The kitchen is now %d squares wide." % kitchen_width)
+
+
+# Nobody may be standing where a new solid piece would go.
+func _people_clear_of(solid: Dictionary) -> bool:
+	var in_use: Dictionary = _cells_in_use(null)
+	for cell in solid:
+		if not furniture.has(cell) and in_use.has(cell):
+			return false
+	return true
+
+
+# Takes the kitchen's pieces off the floor and puts them back at a new
+# position/width. Cooks let go of their Hearths and find them again.
+func _rebuild_kitchen(pos: Vector2i, width: int) -> void:
+	var slots: Array[int] = []
+	for cell in hearths:
+		slots.append(cell.x - kitchen_pos.x)
+		if is_instance_valid(hearths[cell]["cook"]):
+			hearths[cell]["cook"].release_hearth()
+	for cell in furniture.keys():
+		if furniture[cell] != "table":
+			furniture.erase(cell)
+			_remove_prop(cell)
+	hearths.clear()
+	expo_plates.clear()
+	kitchen_pos = pos
+	kitchen_width = width
+	_apply_size()   # resets the pathfinder, then marks furniture and kitchen
+	_place(expo_cell(), "expo")
+	for slot in slots:
+		_place(Vector2i(pos.x + slot, pos.y + 1), "kitchen")
+	_mark_kitchen()
+
+
+# Sets the kitchen from a save file. Saves from before the kitchen had
+# Hearths anywhere, so a spot is found for it (see load_layout).
+func set_kitchen(data) -> bool:
+	if typeof(data) != TYPE_ARRAY or data.size() != 3:
+		return false
+	kitchen_pos = Vector2i(int(data[0]), int(data[1]))
+	kitchen_width = clampi(int(data[2]), KITCHEN_START_WIDTH, KITCHEN_MAX_WIDTH)
+	return _kitchen_fits(kitchen_pos, kitchen_width, {}) == ""
 
 
 # The furniture as plain data for the save file: [[column, row, type], ...]
@@ -395,26 +611,85 @@ func pick_up_plate(cell: Vector2i) -> Customer:
 func get_layout() -> Array:
 	var layout: Array = []
 	for cell in furniture:
-		layout.append([cell.x, cell.y, furniture[cell]])
+		if furniture[cell] != "expo":   # the pass comes with the kitchen
+			layout.append([cell.x, cell.y, furniture[cell]])
 	return layout
 
 
 # Replaces all furniture with a saved layout. Called before any staff
-# or guests exist, so nobody needs a new route.
-func load_layout(layout: Array) -> void:
+# or guests exist, so nobody needs a new route. `kitchen` is the saved
+# kitchen ([x, y, width]) or null for saves from before the kitchen.
+func load_layout(layout: Array, kitchen = null) -> void:
 	for cell in _props.keys():
 		_remove_prop(cell)
 	furniture.clear()
 	table_owner.clear()
 	hearths.clear()
-	_astar.fill_solid_region(_astar.region, false)   # clear every square
+	expo_plates.clear()
+	_apply_size()
+	var saved_hearths: Array[Vector2i] = []
+	var tables: Dictionary = {}
 	for entry in layout:
 		# Skip anything that doesn't make sense rather than crash.
 		if typeof(entry) != TYPE_ARRAY or entry.size() != 3:
 			continue
 		var cell := Vector2i(int(entry[0]), int(entry[1]))
-		if _in_bounds(cell) and cell != door_cell and GameManager.FURNITURE.has(entry[2]):
-			_place(cell, entry[2])
+		if not _in_bounds(cell) or cell == door_cell:
+			continue
+		if entry[2] == "kitchen":
+			saved_hearths.append(cell)
+		elif entry[2] == "table":
+			tables[cell] = true
+
+	var known: bool = set_kitchen(kitchen) if kitchen != null else false
+	if not known:
+		_place_kitchen_for_old_save(saved_hearths.size(), tables)
+	for cell in tables:
+		if not in_kitchen(cell) and cell != expo_front():
+			_place(cell, "table")
+	_place(expo_cell(), "expo")
+
+	# Hearths that were on the kitchen's line stay put; any others (old
+	# saves had them anywhere) move onto free spots on the line. Ones
+	# that don't fit are sold back.
+	var free_slots: Array[Vector2i] = []
+	for x in range(kitchen_pos.x, kitchen_pos.x + kitchen_width - 1):
+		free_slots.append(Vector2i(x, kitchen_pos.y + 1))
+	var leftovers: Array[Vector2i] = []
+	for cell in saved_hearths:
+		if free_slots.has(cell):
+			_place(cell, "kitchen")
+			free_slots.erase(cell)
+		else:
+			leftovers.append(cell)
+	for cell in leftovers:
+		if free_slots.is_empty():
+			GameManager.refund(floori(GameManager.FURNITURE["kitchen"]["cost"] / 2.0))
+		else:
+			_place(free_slots.pop_front(), "kitchen")
+	_mark_kitchen()
+
+
+# Old saves had no kitchen: find the first spot (top rows first) where one
+# fits around the tables, wide enough for every Hearth plus the pass.
+func _place_kitchen_for_old_save(hearth_count: int, tables: Dictionary) -> void:
+	kitchen_width = clampi(hearth_count + 2, KITCHEN_START_WIDTH, KITCHEN_MAX_WIDTH)
+	for y in rows:
+		for x in cols:
+			var pos := Vector2i(x, y)
+			if _kitchen_fits(pos, kitchen_width, tables) != "":
+				continue
+			var solid: Dictionary = tables.duplicate()
+			solid[pos + Vector2i(kitchen_width - 1, 1)] = "expo"
+			if _layout_works(solid, door_cell, pos, kitchen_width):
+				kitchen_pos = pos
+				return
+	# No room anywhere: put it top-left and sell the tables in the way.
+	kitchen_pos = Vector2i.ZERO
+	for cell in tables.keys():
+		if Rect2i(kitchen_pos, Vector2i(kitchen_width, KITCHEN_DEPTH + 1)).has_point(cell):
+			tables.erase(cell)
+			GameManager.refund(floori(GameManager.FURNITURE["table"]["cost"] / 2.0))
 
 
 # ---------------------------------------------------------------------
@@ -427,8 +702,20 @@ func _try_build(cell: Vector2i) -> void:
 	if build_type == "door":
 		_try_move_door(cell)
 		return
+	if build_type == "kitchen_move":
+		_try_move_kitchen(cell)
+		return
 	if furniture.has(cell):
 		build_message.emit("That square is taken.")
+		return
+	if build_type == "table" and in_kitchen(cell):
+		build_message.emit("Tables can't go in the kitchen.")
+		return
+	if build_type == "kitchen" and not on_line(cell):
+		build_message.emit("Hearths go on the kitchen's front row.")
+		return
+	if cell == expo_front():
+		build_message.emit("Keep the spot in front of the pass clear for waiters.")
 		return
 	if cell == door_cell:
 		build_message.emit("Keep the doorway clear!")
@@ -454,7 +741,7 @@ func _place(cell: Vector2i, type: String) -> void:
 	if type == "table":
 		table_owner[cell] = null
 	elif type == "kitchen":
-		hearths[cell] = {"cook": null, "job": {}, "plate_for": null, "plate_taker": null}
+		hearths[cell] = {"cook": null, "job": {}}
 	# Its FloorProp stands at the square's middle, for y-sorting.
 	_props[cell] = _new_prop(type, cell, cell_center(cell))
 
@@ -471,6 +758,8 @@ func _new_prop(kind: String, cell: Vector2i, at: Vector2) -> FloorProp:
 
 func _remove_prop(cell: Vector2i) -> void:
 	if _props.has(cell):
+		# Hidden at once: queue_free() only deletes it at the end of the frame.
+		_props[cell].visible = false
 		_props[cell].queue_free()
 		_props.erase(cell)
 
@@ -500,12 +789,15 @@ func _try_remove(cell: Vector2i) -> void:
 	if not furniture.has(cell):
 		return
 	var type: String = furniture[cell]
+	if type == "expo":
+		build_message.emit("The pass is part of the kitchen. Use Kitchen to move it.")
+		return
 	if type == "table" and table_owner[cell] != null:
 		build_message.emit("Someone's sitting there!")
 		return
 	if type == "kitchen":
 		var h: Dictionary = hearths[cell]
-		if not h["job"].is_empty() or _wants_food(h["plate_for"]):
+		if not h["job"].is_empty():
 			build_message.emit("That Hearth is busy!")
 			return
 		# Send its cook off to find another Hearth.
@@ -540,6 +832,9 @@ func _try_move_door(cell: Vector2i) -> void:
 	if furniture.has(cell):
 		build_message.emit("Clear that square first.")
 		return
+	if in_kitchen(cell) or cell == expo_front():
+		build_message.emit("The door can't go in the kitchen.")
+		return
 	if _cells_in_use(null).has(cell):
 		build_message.emit("Someone's in the way!")
 		return
@@ -547,7 +842,7 @@ func _try_move_door(cell: Vector2i) -> void:
 		if walker.current_cell() == NO_CELL:
 			build_message.emit("Wait until everyone is inside.")
 			return
-	if not _layout_works(furniture, cell):
+	if not _layout_works(furniture, cell, kitchen_pos, kitchen_width):
 		build_message.emit("That would block someone's way!")
 		return
 	if not GameManager.try_spend(DOOR_COST):
@@ -562,13 +857,16 @@ func _try_move_door(cell: Vector2i) -> void:
 func _layout_works_with(new_cell: Vector2i) -> bool:
 	# Pretend the new piece is already there.
 	var solid: Dictionary = furniture.duplicate()
-	solid[new_cell] = true
-	return _layout_works(solid, door_cell)
+	solid[new_cell] = build_type
+	return _layout_works(solid, door_cell, kitchen_pos, kitchen_width)
 
 
 # Every piece of furniture needs a side people can reach from the door,
-# and nobody may get walled in.
-func _layout_works(solid: Dictionary, door: Vector2i) -> bool:
+# and nobody may get walled in. In the kitchen, every Hearth needs the
+# aisle square behind it free and reachable (that's where its cook
+# stands), and the pass needs both its back (cooks) and front (waiters).
+# `solid` maps squares to what's on them.
+func _layout_works(solid: Dictionary, door: Vector2i, k_pos: Vector2i, k_width: int) -> bool:
 	# FLOOD FILL outward from the door: visit every square we can walk
 	# to, one step at a time, until there's nowhere new to go.
 	var reachable: Dictionary = {door: true}
@@ -593,7 +891,17 @@ func _layout_works(solid: Dictionary, door: Vector2i) -> bool:
 	for person_cell in _cells_in_use(null):
 		if not reachable.has(person_cell):
 			return false
-	return true
+
+	for piece in solid:
+		var needs: Array = []
+		match solid[piece]:
+			"kitchen": needs = [piece + Vector2i(0, -1)]
+			"expo": needs = [piece + Vector2i(0, -1), piece + Vector2i(0, 1)]
+		for spot in needs:
+			if not reachable.has(spot):
+				return false
+	# Kitchen geometry: the aisle row must exist above the line.
+	return k_pos.y >= 0 and k_pos.y + KITCHEN_DEPTH <= rows and k_width >= KITCHEN_START_WIDTH
 
 
 # Every square someone is standing on or walking to, as dictionary keys.
@@ -646,6 +954,8 @@ const PLASTER_LEFT := Color8(224, 208, 174)   # back wall along the left edge (s
 const PANEL_TOP := Color8(152, 100, 60)
 const PANEL_LEFT := Color8(134, 87, 52)
 const TRIM := Color8(105, 66, 38)
+const KITCHEN_A := Color8(176, 178, 180)    # stone tiles in the kitchen
+const KITCHEN_B := Color8(160, 163, 166)
 
 
 # The four corners of a square's diamond, in this node's space.
@@ -663,7 +973,11 @@ func _draw() -> void:
 	for x in cols:
 		for y in rows:
 			var tile: PackedVector2Array = _diamond(Vector2i(x, y))
-			draw_colored_polygon(tile, FLOOR_A if (x + y) % 2 == 0 else FLOOR_B)
+			var even: bool = (x + y) % 2 == 0
+			if in_kitchen(Vector2i(x, y)):
+				draw_colored_polygon(tile, KITCHEN_A if even else KITCHEN_B)
+			else:
+				draw_colored_polygon(tile, FLOOR_A if even else FLOOR_B)
 			draw_polyline(tile + PackedVector2Array([tile[0]]), FLOOR_LINE, 1.0)
 
 	# Doormat on the doorway square.
@@ -693,6 +1007,13 @@ func _draw() -> void:
 					draw_colored_polygon(tile, Color(1.0, 0.85, 0.3, 0.3))
 				draw_polyline(tile + PackedVector2Array([tile[0]]), Color(0.35, 0.2, 0.08, 0.55), 1.5)
 		draw_colored_polygon(_diamond(door_cell), Color(1, 0.2, 0.2, 0.25))
+		# The kitchen's outline, and the waiters' pickup spot.
+		var zone := PackedVector2Array([iso(Vector2(kitchen_pos)),
+				iso(Vector2(kitchen_pos + Vector2i(kitchen_width, 0))),
+				iso(Vector2(kitchen_pos + Vector2i(kitchen_width, KITCHEN_DEPTH))),
+				iso(Vector2(kitchen_pos + Vector2i(0, KITCHEN_DEPTH)))])
+		draw_polyline(zone + PackedVector2Array([zone[0]]), Color8(230, 120, 40), 3.0)
+		draw_colored_polygon(_diamond(expo_front()), Color(0.3, 0.6, 1.0, 0.25))
 
 
 func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, door: bool, window: bool) -> void:
@@ -722,9 +1043,12 @@ func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, d
 
 # Draws one FloorProp, in the prop's own space (its position is 0, 0).
 func draw_prop(prop: FloorProp) -> void:
+	if prop.kind == "kitchen" and not hearths.has(prop.cell):
+		return   # just removed; it disappears at the end of the frame
 	match prop.kind:
 		"table": _draw_table(prop)
 		"kitchen": _draw_hearth(prop)
+		"expo": _draw_expo(prop)
 		"wall": _draw_front_wall(prop)
 
 
@@ -765,9 +1089,6 @@ func _draw_hearth(prop: FloorProp) -> void:
 	var flicker: float = 1.0 + 0.15 * sin(Time.get_ticks_msec() / 90.0) if cooking else 0.8
 	prop.draw_circle(top, 10.0 * flicker, Color8(235, 120, 40))
 	prop.draw_circle(top, 5.0 * flicker, Color8(255, 210, 90))
-	if is_instance_valid(h["plate_for"]):
-		prop.draw_circle(top + Vector2(14, 2), 7.0, Color.WHITE)
-		prop.draw_circle(top + Vector2(14, 2), 4.0, Color8(190, 110, 50))
 	if cooking:
 		var job: Dictionary = h["job"]
 		var done: float = 1.0 - job["time_left"] / job["total"]
@@ -777,6 +1098,17 @@ func _draw_hearth(prop: FloorProp) -> void:
 	if not is_instance_valid(h["cook"]):
 		prop.draw_string(font, top + Vector2(-40, -26), "No cook",
 				HORIZONTAL_ALIGNMENT_CENTER, 80, 15, Color(1.0, 0.75, 0.75))
+
+
+# The pass: a low counter with the waiting plates on it.
+func _draw_expo(prop: FloorProp) -> void:
+	var top: Vector2 = _draw_block(prop, 0.85, 26.0, Color8(214, 200, 176), Color8(150, 110, 70), Color8(128, 92, 58))
+	for i in expo_plates.size():
+		var spot: Vector2 = top + Vector2(-14 + i * 14, -2 + (i % 2) * 4)
+		prop.draw_circle(spot, 7.0, Color.WHITE)
+		prop.draw_circle(spot, 4.0, Color8(190, 110, 50))
+	prop.draw_string(ThemeDB.fallback_font, top + Vector2(-30, -14), "PASS",
+			HORIZONTAL_ALIGNMENT_CENTER, 60, 13, Color8(90, 60, 35))
 
 
 func _draw_front_wall(prop: FloorProp) -> void:

@@ -44,6 +44,9 @@ var sprite_sheet: Texture2D       # null = no sprite
 # false = never show this walker's back: walking away from the camera
 # shows their side profile instead (guests use this).
 var show_back: bool = true
+# true = always face the camera, even walking sideways (cooks use this,
+# so they never turn their back on the room).
+var always_front: bool = false
 var _facing: String = "front"     # "front", "back", "left" or "right"
 var _last_side: String = "right"  # the profile to use when walking straight up
 var _anim_time: float = 0.0
@@ -144,6 +147,9 @@ func _note_movement(moved: Vector2, delta: float) -> void:
 		return
 	_last_moved_frame = Engine.get_process_frames()
 	_anim_time += delta
+	if always_front:
+		_facing = "front"
+		return
 	if absf(moved.x) > absf(moved.y):
 		_facing = "right" if moved.x > 0 else "left"
 	elif moved.y > 0:

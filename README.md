@@ -25,9 +25,13 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
   | Old Regular | Walks slowly, comes once a day, always orders the same favorite dish |
   | Adventurers | From 10 fame: a party of 2-3 sharing one table. Tip 25%, but if one storms off they all leave |
   | Lord / Lady | Only at Noble Banquets |
-- **Waiters** take orders, fetch finished dishes from a Hearth and carry them
-  to the table.
-- **Cooks** work the Hearths. A Hearth only cooks while a cook stands at it.
+- **The kitchen** is a zone 2 squares deep (grey stone floor). Hearths go
+  on its front row; the **pass** (expo counter) is at the right end.
+- **Cooks** stand in the kitchen aisle behind their Hearth, always facing
+  the room. When a dish is done they carry it to the pass. The pass holds 3
+  plates; if it's full, cooks wait.
+- **Waiters** take orders, collect dishes from the front of the pass (they
+  never enter the kitchen) and carry them to the table.
 - Every guest has a **patience bar**. If it runs out, they storm off.
 - **Fame** grows slowly, and comes from three places:
   - **Nightly reviews**: the share of today's guests who left happy (anyone
@@ -54,8 +58,11 @@ The bottom bar has four buttons:
   block the doorway or wall anyone in.
   - **Door** moves the front door to any square along a wall (100g, between
     days). The waiting line follows it.
+  - **Move Kitchen** moves the whole kitchen (Hearths and pass too) between
+    days: tap where its back-left corner should go.
   - **Expand** makes the floor bigger, up to 12 x 14. Each expansion is
     unlocked by a quest (like "Serve 60 guests"), then bought with gold.
+    The same card has **Widen Kitchen** (150g a square, up to 8 wide).
 - **Staff** opens a tray: **Hire Cook**, **Hire Waiter** (three new
   applicants each day) and **Your Staff** (let someone go). Between days
   only. Wages are paid every night. Every staff member has a name, their

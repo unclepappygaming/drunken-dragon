@@ -58,6 +58,8 @@ func _ready() -> void:
 	hud.staff_list_requested.connect(_show_staff_list)
 	hud.new_game_requested.connect(_on_new_game_requested)
 	hud.expand_requested.connect(_on_expand_requested)
+	hud.widen_kitchen_requested.connect(grid.try_widen_kitchen)
+	hud.grid = grid
 	# You can connect a signal straight to another node's function.
 	grid.build_message.connect(hud.show_message)
 	camera.tapped.connect(grid.handle_tap)
@@ -83,7 +85,8 @@ func _ready() -> void:
 		var door = save.get("door", [])
 		if typeof(door) == TYPE_ARRAY and door.size() == 2:
 			grid.set_door(str(door[0]), int(door[1]))
-		grid.load_layout(save.get("furniture", []))
+		# Saves from before the kitchen have no "kitchen": the grid finds one.
+		grid.load_layout(save.get("furniture", []), save.get("kitchen", null))
 		# clampi keeps a number within limits, in case the file was edited.
 		_load_staff(save)
 		# Day 0 means they built or hired before ever opening.
@@ -442,7 +445,7 @@ func _save_if_closed() -> void:
 	# Mid-day changes are saved at the end of the day instead.
 	if GameManager.is_open or _waiting_for_last_guests:
 		return
-	GameManager.save_game(grid.get_layout(), grid.get_door(), _staff_profiles())
+	GameManager.save_game(grid.get_layout(), grid.get_door(), grid.get_kitchen(), _staff_profiles())
 
 
 func _show_day_summary() -> void:

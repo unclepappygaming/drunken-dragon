@@ -1,11 +1,14 @@
 # =====================================================================
 # waiter.gd  —  one waiter. Attached to scenes/waiter.tscn.
 #
-# Waiters do two jobs, always picking finished food first (a plate left
-# on a Hearth stops it cooking the next dish):
+# Waiters do two jobs, always picking finished food first (a full pass
+# makes cooks wait):
 #
 #   take an order:  IDLE -> TO_GUEST -> TAKING_ORDER -> IDLE
-#   serve food:     IDLE -> TO_HEARTH -> CARRYING -> IDLE
+#   serve food:     IDLE -> TO_PASS -> CARRYING -> IDLE
+#
+# Waiters never go into the kitchen: they collect plates from the square
+# in front of the pass (the expo counter).
 #
 # If the guest storms out halfway, the waiter gives up and goes back to
 # IDLE (any food they were carrying is wasted). LEAVING is used when
@@ -19,7 +22,7 @@
 class_name Waiter
 extends Walker
 
-enum State { IDLE, TO_GUEST, TAKING_ORDER, TO_HEARTH, CARRYING, LEAVING }
+enum State { IDLE, TO_GUEST, TAKING_ORDER, TO_PASS, CARRYING, LEAVING }
 
 const WALK_SPEED: float = 220.0
 const ORDER_TAKE_TIME: float = 1.0
@@ -30,7 +33,6 @@ const LUCKY_TIP: float = 0.5
 var state: State = State.IDLE
 
 var _guest: Customer = null                 # who we're working for
-var _hearth: Vector2i = TavernGrid.NO_CELL  # where we're fetching food
 var _timer: float = 0.0
 var profile: Dictionary = {}
 
@@ -75,14 +77,12 @@ func _process(delta: float) -> void:
 					_guest = null
 					state = State.IDLE
 
-		State.TO_HEARTH:
+		State.TO_PASS:
 			# The grid clears a plate if its guest leaves before we get there.
-			if not grid.is_plate_waiting(_hearth, self):
-				_hearth = TavernGrid.NO_CELL
+			if not grid.is_plate_waiting(self):
 				_give_up()
 			elif _walk(delta):
-				_guest = grid.pick_up_plate(_hearth)
-				_hearth = TavernGrid.NO_CELL
+				_guest = grid.pick_up_plate(self)
 				if _guest == null:
 					state = State.IDLE
 				else:
@@ -114,12 +114,10 @@ func leave() -> void:
 
 func _find_task() -> void:
 	# Finished food first.
-	var hearth: Vector2i = grid.claim_ready_plate(self)
-	if hearth != TavernGrid.NO_CELL:
+	if grid.claim_ready_plate(self):
 		end_standby()
-		_hearth = hearth
-		go_to_cell(grid.access_cell(hearth, position, self))
-		state = State.TO_HEARTH
+		go_to_cell(grid.expo_front())
+		state = State.TO_PASS
 		return
 
 	var guest: Customer = GameManager.next_order_request()

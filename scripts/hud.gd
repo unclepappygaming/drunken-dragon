@@ -28,6 +28,7 @@ signal fire_requested(uid: int)
 signal staff_list_requested
 signal new_game_requested
 signal expand_requested
+signal widen_kitchen_requested
 
 const TOP_HEIGHT: int = 150
 const BAR_HEIGHT: int = 120
@@ -60,6 +61,9 @@ var _recipe_list: VBoxContainer
 var _expand_panel: PanelContainer
 var _expand_label: Label
 var _expand_button: Button
+var _widen_button: Button
+# Set by main.gd, so cards can show the kitchen's size.
+var grid: TavernGrid
 var _plan_panel: PanelContainer
 var _people_panel: PanelContainer
 var _people_title: Label
@@ -212,7 +216,8 @@ func _select_tool(type: String) -> void:
 		_tool_buttons[tool].modulate = HIGHLIGHT if tool == type else Color.WHITE
 	match type:
 		"table":   _set_hint("Tap a square: Table (50g)")
-		"kitchen": _set_hint("Tap a square: Hearth (120g)")
+		"kitchen": _set_hint("Tap the kitchen's front row: Hearth (120g)")
+		"kitchen_move": _set_hint("Tap where the kitchen's back-left corner should go")
 		"remove":  _set_hint("Tap furniture to sell it (half price)")
 		"door":    _set_hint("Tap a square along a wall to move the door (%dg)" % TavernGrid.DOOR_COST)
 
@@ -407,7 +412,7 @@ func _build_trays() -> void:
 	var build_row := HBoxContainer.new()
 	build_panel.add_child(build_row)
 	var tools: Array = [["Table\n50g", "table"], ["Hearth\n120g", "kitchen"], ["Sell", "remove"],
-			["Door\n%dg" % TavernGrid.DOOR_COST, "door"]]
+			["Door\n%dg" % TavernGrid.DOOR_COST, "door"], ["Move\nKitchen", "kitchen_move"]]
 	for entry in tools:
 		var button := _make_button(entry[0], 21, build_row, 86)
 		button.pressed.connect(_select_tool.bind(entry[1]))
@@ -591,6 +596,10 @@ func _build_expand_panel() -> void:
 
 	_expand_button = _make_button("Build", 28, vbox, 90)
 	_expand_button.pressed.connect(expand_requested.emit)
+	_widen_button = _make_button("Widen Kitchen", 24, vbox, 80)
+	_widen_button.pressed.connect(func():
+		widen_kitchen_requested.emit()
+		_refresh_expand_panel())
 	var close := _make_button("Close", 24, vbox, 70)
 	close.pressed.connect(close_expand_panel)
 
@@ -598,9 +607,18 @@ func _build_expand_panel() -> void:
 func _refresh_expand_panel() -> void:
 	if not _expand_panel.visible:
 		return
+	# The kitchen: wider means room for more Hearths.
+	var kitchen_text: String = ""
+	if grid != null:
+		var wide: int = grid.kitchen_width
+		kitchen_text = "\n\nKitchen: %d squares wide (up to %d)" % [wide, TavernGrid.KITCHEN_MAX_WIDTH]
+		_widen_button.visible = wide < TavernGrid.KITCHEN_MAX_WIDTH
+		_widen_button.text = "Widen Kitchen (%dg)" % TavernGrid.KITCHEN_WIDEN_COST
+		_widen_button.disabled = GameManager.gold < TavernGrid.KITCHEN_WIDEN_COST
+
 	var next: Dictionary = GameManager.next_expansion()
 	if next.is_empty():
-		_expand_label.text = "Expand the Tavern\n\nYour tavern is as big as it gets!"
+		_expand_label.text = "Expand the Tavern\n\nYour tavern is as big as it gets!" + kitchen_text
 		_expand_button.visible = false
 		return
 	var size: Vector2i = GameManager.floor_size()
@@ -610,7 +628,7 @@ func _refresh_expand_panel() -> void:
 		next["title"], next["task"], GameManager.expansion_progress(), next["goal"],
 		"  Done!" if done else "",
 		next["cost"],
-	]
+	] + kitchen_text
 	_expand_button.visible = true
 	_expand_button.text = "Build (%dg)" % next["cost"] if done else "Finish the quest first"
 	_expand_button.disabled = not done or GameManager.gold < next["cost"]
