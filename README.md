@@ -95,6 +95,22 @@ The bottom bar has four buttons:
   whether to host one). The end-of-day summary closes with Continue, so you
   can build and hire first.
 
+### The Grand Hall
+
+Once the tavern is fully expanded (12 x 14) and you're **Legendary** (140
+fame), the Expand card offers a move to **the Grand Hall** in the capital
+(15000g, tap twice to confirm). Your fame, recipes, stats and staff come
+along; the furniture stays behind and you start with a 6-wide kitchen,
+three Hearths and eight tables.
+
+- The hall starts at 16 x 16 and has four expansions of its own, up to
+  24 x 24 (6000g to 18000g), each unlocked by a hall quest: serve 300
+  guests, serve 20 nobles, have 3 perfect days, serve 1500 guests.
+- City guests pay 25% more. Instead of fame, the hall's crowds grow with
+  each expansion, down to about one guest a second outside rushes.
+- Up to 12 cooks and 12 waiters, and the kitchen can widen to 12 squares.
+- Marble floors, stone walls with crimson panelling, gold trim and banners.
+
 The game saves automatically between days. **New Game** on the day summary
 erases the save (it asks twice).
 
@@ -147,8 +163,8 @@ The floor and walls are drawn in code; characters and furniture are pixel-art sp
      expansions and wages, tested with a bot over 50-day games: a good
      player reaches Local Haunt around day 7, Town Favorite day 11, Talk of
      the Realm day 18, Famed Hall day 26 and Legendary around day 43
-   - ⬜ More to spend gold on late in the game (it piles up once everything
-     is built)
+   - ✅ The Grand Hall gives late-game gold a goal (a bot reaches it around
+     day 47 and fills it out over the next ~40 days)
 5. ✅ **Bigger tavern**
    - ✅ Four floor expansions up to 12 x 14, each earned by a quest, then bought
    - ✅ Move the front door to any wall, with the same "nothing gets blocked" check
@@ -165,5 +181,10 @@ The floor and walls are drawn in code; characters and furniture are pixel-art sp
    - ✅ Plates on tables, and waiters clear them after guests leave
    - ⬜ Sprites for the floor and walls
    - Sound effects and music (they start after the first tap, as browsers require)
-7. ⬜ **UI moved into editable scenes**, so menus can be restyled in the
+7. ⬜ **The Grand Hall, continued**
+   - ✅ Step 1: the move, a bigger floor with its own look and expansions
+   - ⬜ Rooms: a private dining room for nobles, a bar
+   - ⬜ New staff roles: host, dishwasher, bartender, head chef
+   - ⬜ New guests and dishes, and ranks beyond Legendary
+8. ⬜ **UI moved into editable scenes**, so menus can be restyled in the
    Godot editor

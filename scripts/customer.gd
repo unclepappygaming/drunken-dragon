@@ -184,6 +184,8 @@ func _process(delta: float) -> void:
 				var share: float = 1.0 + price_bonus + GuestTypes.TYPES[guest_type]["pay"]
 				if is_noble:
 					share += GameManager.NOBLE_TIP   # nobles tip well
+				if GameManager.in_hall():
+					share += GameManager.HALL_PRICE_BONUS   # city prices
 				# A guard served quickly is grateful.
 				if guest_type == "guard" and _patience_at_serve > _patience_max / 2.0:
 					share += GuestTypes.GUARD_TIP

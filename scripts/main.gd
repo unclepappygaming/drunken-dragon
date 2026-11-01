@@ -23,6 +23,7 @@ const CUSTOMER_SCENE: PackedScene = preload("res://scenes/customer.tscn")
 const COOK_SCENE: PackedScene = preload("res://scenes/cook.tscn")
 const WAITER_SCENE: PackedScene = preload("res://scenes/waiter.tscn")
 const MAX_STAFF: int = 8   # per role
+const HALL_MAX_STAFF: int = 12   # per role, in the Grand Hall
 const MAX_LINE: int = 5    # guests who will wait outside for a table
 const LINE_GAP: float = 46.0   # pixels between people in the line
 
@@ -49,8 +50,8 @@ var _regular_came_today: bool = false
 
 
 func _ready() -> void:
-	# The street around the tavern.
-	RenderingServer.set_default_clear_color(Color8(120, 128, 112))
+	# The street around the tavern (set again once the save is loaded).
+	RenderingServer.set_default_clear_color(_street_color())
 	hud.build_selected.connect(_on_build_selected)
 	hud.day_start_requested.connect(_on_day_start_requested)
 	hud.hire_requested.connect(_on_hire_requested)
@@ -59,6 +60,7 @@ func _ready() -> void:
 	hud.new_game_requested.connect(_on_new_game_requested)
 	hud.expand_requested.connect(_on_expand_requested)
 	hud.widen_kitchen_requested.connect(grid.try_widen_kitchen)
+	hud.move_requested.connect(_on_move_requested)
 	hud.grid = grid
 	# You can connect a signal straight to another node's function.
 	grid.build_message.connect(hud.show_message)
@@ -97,6 +99,7 @@ func _ready() -> void:
 		hud.show_summary(
 			"Welcome back to\nThe Drunken Dragon!\n\n%s\nGold: %d\nFame: %d" % [progress, GameManager.gold, GameManager.fame],
 			true)
+	RenderingServer.set_default_clear_color(_street_color())
 	_update_staff_display()
 	_fit_camera()
 	hud.set_day_button("Open\nDay %d" % (GameManager.day + 1), true)
@@ -328,6 +331,38 @@ func _on_expand_requested() -> void:
 	hud.close_expand_panel()
 
 
+# Moving to the Grand Hall: pay, then set up the new, bigger floor with a
+# starter layout. Staff, fame and recipes come along.
+func _on_move_requested() -> void:
+	if GameManager.is_open or _waiting_for_last_guests:
+		hud.show_message("Move after closing time.")
+		return
+	var blocker: String = GameManager.move_blocker()
+	if blocker != "":
+		hud.show_message(blocker)
+		return
+	if not GameManager.move_to_hall():
+		return
+	var size: Vector2i = GameManager.floor_size()
+	grid.start_grand_hall(size.x, size.y)
+	RenderingServer.set_default_clear_color(_street_color())
+	_fit_camera()
+	hud.close_expand_panel()
+	_announce_fame()   # the "Move to the Grand Hall" milestone
+	_update_staff_display()
+	_save_if_closed()
+	hud.show_summary("Welcome to\nthe Grand Hall!\n\nThe Drunken Dragon has moved to the capital. Your fame, recipes and staff came along; the furniture stayed behind.\n\nCity guests pay 25%% more, and the crowds grow with every expansion. You can hire up to %d of each kind of staff." % HALL_MAX_STAFF)
+
+
+# The street around the building: country green, or city cobbles.
+func _street_color() -> Color:
+	return Color8(112, 110, 116) if GameManager.in_hall() else Color8(120, 128, 112)
+
+
+func max_staff() -> int:
+	return HALL_MAX_STAFF if GameManager.in_hall() else MAX_STAFF
+
+
 # Rushes start straight away: guests already on the way come sooner.
 func _on_rush_changed(rush_name: String) -> void:
 	if rush_name == "":
@@ -362,7 +397,7 @@ func _staff_changes_allowed() -> bool:
 func _on_hire_requested(role: String, index: int) -> void:
 	if not _staff_changes_allowed():
 		return
-	if get_tree().get_nodes_in_group(role + "s").size() >= MAX_STAFF:
+	if get_tree().get_nodes_in_group(role + "s").size() >= max_staff():
 		hud.show_message("That's plenty of %ss!" % role)
 		return
 	var candidates: Array = GameManager.applicants(role)
@@ -420,12 +455,12 @@ func _load_staff(save: Dictionary) -> void:
 		for entry in saved:
 			for role in ["cook", "waiter"]:
 				var profile: Dictionary = StaffProfiles.clean(entry, role)
-				if not profile.is_empty() and get_tree().get_nodes_in_group(role + "s").size() < MAX_STAFF:
+				if not profile.is_empty() and get_tree().get_nodes_in_group(role + "s").size() < max_staff():
 					_hire(profile)
 	else:
-		for i in clampi(int(save.get("cooks", 1)), 1, MAX_STAFF):
+		for i in clampi(int(save.get("cooks", 1)), 1, max_staff()):
 			_hire(StaffProfiles.random_profile("cook"))
-		for i in clampi(int(save.get("waiters", 1)), 1, MAX_STAFF):
+		for i in clampi(int(save.get("waiters", 1)), 1, max_staff()):
 			_hire(StaffProfiles.random_profile("waiter"))
 	# Everyone needs at least one of each.
 	for role in ["cook", "waiter"]:

@@ -71,6 +71,7 @@ var door_cell: Vector2i = Vector2i(4, START_ROWS - 1)
 const KITCHEN_DEPTH: int = 2
 const KITCHEN_START_WIDTH: int = 4
 const KITCHEN_MAX_WIDTH: int = 8
+const HALL_KITCHEN_MAX_WIDTH: int = 12   # the Grand Hall's kitchen can grow wider
 const KITCHEN_WIDEN_COST: int = 250
 const EXPO_CAPACITY: int = 3      # plates the pass can hold
 # Walking through the kitchen counts as this many squares, so guests and
@@ -619,12 +620,36 @@ func _try_move_kitchen(cell: Vector2i) -> void:
 	build_message.emit("Moved the kitchen.")
 
 
+func kitchen_max_width() -> int:
+	return HALL_KITCHEN_MAX_WIDTH if GameManager.in_hall() else KITCHEN_MAX_WIDTH
+
+
+# Moving into the Grand Hall: an empty floor of the new size with a
+# starter layout (a 6-wide kitchen with three Hearths, and eight tables).
+# Staff keep their jobs and find their new places.
+func start_grand_hall(new_cols: int, new_rows: int) -> void:
+	wash_all_tables()
+	for cell in hearths:
+		if is_instance_valid(hearths[cell]["cook"]):
+			hearths[cell]["cook"].release_hearth()
+	cols = new_cols
+	rows = new_rows
+	set_door("bottom", new_cols / 2)
+	var layout: Array = [[5, 1, "kitchen"], [6, 1, "kitchen"], [7, 1, "kitchen"]]
+	for y in [5, 9]:
+		for x in [2, 5, 8, 11]:
+			layout.append([x, y, "table"])
+	load_layout(layout, [5, 0, 6])
+	_move_staff_aside()
+	layout_changed.emit()
+
+
 # One more square of width on the right; the pass moves to the new end.
 func try_widen_kitchen() -> void:
 	if GameManager.is_open or not get_tree().get_nodes_in_group("customers").is_empty():
 		build_message.emit("Widen the kitchen after closing time.")
 		return
-	if kitchen_width >= KITCHEN_MAX_WIDTH:
+	if kitchen_width >= kitchen_max_width():
 		build_message.emit("The kitchen is as wide as it gets.")
 		return
 	var tables: Dictionary = {}
@@ -702,7 +727,7 @@ func set_kitchen(data) -> bool:
 	if typeof(data) != TYPE_ARRAY or data.size() != 3:
 		return false
 	kitchen_pos = Vector2i(int(data[0]), int(data[1]))
-	kitchen_width = clampi(int(data[2]), KITCHEN_START_WIDTH, KITCHEN_MAX_WIDTH)
+	kitchen_width = clampi(int(data[2]), KITCHEN_START_WIDTH, kitchen_max_width())
 	return _kitchen_fits(kitchen_pos, kitchen_width, {}) == ""
 
 
@@ -773,7 +798,7 @@ func load_layout(layout: Array, kitchen = null) -> void:
 # Old saves had no kitchen: find the first spot (top rows first) where one
 # fits around the tables, wide enough for every Hearth plus the pass.
 func _place_kitchen_for_old_save(hearth_count: int, tables: Dictionary) -> void:
-	kitchen_width = clampi(hearth_count + 2, KITCHEN_START_WIDTH, KITCHEN_MAX_WIDTH)
+	kitchen_width = clampi(hearth_count + 2, KITCHEN_START_WIDTH, kitchen_max_width())
 	for y in rows:
 		for x in cols:
 			var pos := Vector2i(x, y)
@@ -1050,16 +1075,29 @@ func _pop_next_order() -> Customer:
 # ---------------------------------------------------------------------
 # Drawing
 # ---------------------------------------------------------------------
-const FLOOR_A := Color8(237, 201, 138)
-const FLOOR_B := Color8(226, 185, 118)
-const FLOOR_LINE := Color8(205, 160, 98)
-const PLASTER_TOP := Color8(240, 226, 194)    # back wall along the top edge
-const PLASTER_LEFT := Color8(224, 208, 174)   # back wall along the left edge (shadier)
-const PANEL_TOP := Color8(152, 100, 60)
-const PANEL_LEFT := Color8(134, 87, 52)
-const TRIM := Color8(105, 66, 38)
-const KITCHEN_A := Color8(176, 178, 180)    # stone tiles in the kitchen
-const KITCHEN_B := Color8(160, 163, 166)
+# Colors for each location: the country tavern (wood and plaster) and the
+# Grand Hall (marble, stone, crimson and gold).
+const THEMES: Dictionary = {
+	"tavern": {
+		"floor_a": Color8(237, 201, 138), "floor_b": Color8(226, 185, 118), "floor_line": Color8(205, 160, 98),
+		"plaster_top": Color8(240, 226, 194),    # back wall along the top edge
+		"plaster_left": Color8(224, 208, 174),   # back wall along the left edge (shadier)
+		"panel_top": Color8(152, 100, 60), "panel_left": Color8(134, 87, 52), "trim": Color8(105, 66, 38),
+		"kitchen_a": Color8(176, 178, 180), "kitchen_b": Color8(160, 163, 166),   # stone tiles
+		"front_bottom": Color8(178, 118, 70), "front_right": Color8(156, 102, 60), "front_rail": Color8(210, 160, 105),
+	},
+	"grand_hall": {
+		"floor_a": Color8(232, 228, 218), "floor_b": Color8(196, 190, 180), "floor_line": Color8(170, 162, 150),
+		"plaster_top": Color8(205, 196, 180), "plaster_left": Color8(186, 176, 160),
+		"panel_top": Color8(140, 38, 44), "panel_left": Color8(118, 32, 38), "trim": Color8(196, 156, 64),
+		"kitchen_a": Color8(132, 136, 142), "kitchen_b": Color8(116, 120, 126),   # slate tiles
+		"front_bottom": Color8(176, 168, 152), "front_right": Color8(152, 144, 130), "front_rail": Color8(214, 176, 82),
+	},
+}
+
+
+func _c(key: String) -> Color:
+	return THEMES[GameManager.location][key]
 
 
 # The four corners of a square's diamond, in this node's space.
@@ -1079,10 +1117,10 @@ func _draw() -> void:
 			var tile: PackedVector2Array = _diamond(Vector2i(x, y))
 			var even: bool = (x + y) % 2 == 0
 			if in_kitchen(Vector2i(x, y)):
-				draw_colored_polygon(tile, KITCHEN_A if even else KITCHEN_B)
+				draw_colored_polygon(tile, _c("kitchen_a") if even else _c("kitchen_b"))
 			else:
-				draw_colored_polygon(tile, FLOOR_A if even else FLOOR_B)
-			draw_polyline(tile + PackedVector2Array([tile[0]]), FLOOR_LINE, 1.0)
+				draw_colored_polygon(tile, _c("floor_a") if even else _c("floor_b"))
+			draw_polyline(tile + PackedVector2Array([tile[0]]), _c("floor_line"), 1.0)
 
 	# Doormat on the doorway square.
 	var mat: PackedVector2Array = _diamond(door_cell)
@@ -1094,11 +1132,11 @@ func _draw() -> void:
 	# Back walls: the top edge (upper right on screen) and the left edge
 	# (upper left). Each wall piece is a floor edge pushed straight up.
 	for x in cols:
-		_draw_back_wall(iso(Vector2(x, 0)), iso(Vector2(x + 1, 0)), PLASTER_TOP, PANEL_TOP,
-				door_side == "top" and door_index == x, x % 3 == 1)
+		_draw_back_wall(iso(Vector2(x, 0)), iso(Vector2(x + 1, 0)), _c("plaster_top"), _c("panel_top"),
+				door_side == "top" and door_index == x, x % 3 == 1, GameManager.in_hall() and x % 3 == 2)
 	for y in rows:
-		_draw_back_wall(iso(Vector2(0, y)), iso(Vector2(0, y + 1)), PLASTER_LEFT, PANEL_LEFT,
-				door_side == "left" and door_index == y, y % 3 == 1)
+		_draw_back_wall(iso(Vector2(0, y)), iso(Vector2(0, y + 1)), _c("plaster_left"), _c("panel_left"),
+				door_side == "left" and door_index == y, y % 3 == 1, GameManager.in_hall() and y % 3 == 2)
 
 	# Build mode: outline every square, tint the doorway, and with the
 	# Door tool, show every edge square the door could move to.
@@ -1120,13 +1158,13 @@ func _draw() -> void:
 		draw_colored_polygon(_diamond(expo_front()), Color(0.3, 0.6, 1.0, 0.25))
 
 
-func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, door: bool, window: bool) -> void:
+func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, door: bool, window: bool, banner: bool = false) -> void:
 	var up := Vector2(0, -WALL_HEIGHT)
 	draw_colored_polygon(PackedVector2Array([from, to, to + up, from + up]), plaster)
 	var panel_up: Vector2 = up * 0.38                       # wood panelling along the bottom
 	draw_colored_polygon(PackedVector2Array([from, to, to + panel_up, from + panel_up]), panel)
-	draw_line(from + up, to + up, TRIM, 4.0)                # top trim
-	draw_line(from + panel_up, to + panel_up, TRIM, 2.0)
+	draw_line(from + up, to + up, _c("trim"), 4.0)                # top trim
+	draw_line(from + panel_up, to + panel_up, _c("trim"), 2.0)
 	var along: Vector2 = to - from
 	if door:
 		# A wooden door in the wall.
@@ -1134,15 +1172,25 @@ func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, d
 		var b: Vector2 = from + along * 0.8
 		var door_up: Vector2 = up * 0.78
 		draw_colored_polygon(PackedVector2Array([a, b, b + door_up, a + door_up]), Color8(120, 74, 40))
-		draw_polyline(PackedVector2Array([a, a + door_up, b + door_up, b]), TRIM, 2.0)
+		draw_polyline(PackedVector2Array([a, a + door_up, b + door_up, b]), _c("trim"), 2.0)
 		draw_circle(a + along * 0.5 + door_up * 0.45, 2.0, Color8(230, 190, 80))
 	elif window:
 		var a: Vector2 = from + along * 0.22 + up * 0.5
 		var b: Vector2 = from + along * 0.78 + up * 0.5
 		var win_up: Vector2 = up * 0.36
 		draw_colored_polygon(PackedVector2Array([a, b, b + win_up, a + win_up]), Color8(175, 214, 236))
-		draw_polyline(PackedVector2Array([a, b, b + win_up, a + win_up, a]), TRIM, 2.0)
-		draw_line((a + b) / 2.0, (a + b) / 2.0 + win_up, TRIM, 2.0)
+		draw_polyline(PackedVector2Array([a, b, b + win_up, a + win_up, a]), _c("trim"), 2.0)
+		draw_line((a + b) / 2.0, (a + b) / 2.0 + win_up, _c("trim"), 2.0)
+	elif banner:
+		# A crimson banner with a gold border, hanging from the top trim.
+		var a: Vector2 = from + along * 0.3 + up * 0.95
+		var b: Vector2 = from + along * 0.7 + up * 0.95
+		var drop: Vector2 = -up * 0.5
+		var tip: Vector2 = (a + b) / 2.0 + drop * 0.8   # the notch at the bottom
+		var cloth := PackedVector2Array([a, b, b + drop, tip, a + drop])
+		draw_colored_polygon(cloth, Color8(150, 30, 40))
+		draw_polyline(cloth + PackedVector2Array([a]), _c("trim"), 2.0)
+		draw_circle((a + b) / 2.0 + drop * 0.4, 4.0, _c("trim"))   # a gold emblem
 
 
 # Draws one FloorProp, in the prop's own space (its position is 0, 0).
@@ -1239,6 +1287,6 @@ func _draw_front_wall(prop: FloorProp) -> void:
 	var corners := {"bottom": Vector2(-TILE_W / 2.0, -TILE_H / 2.0), "right": Vector2(TILE_W / 2.0, -TILE_H / 2.0)}
 	for edge in prop.edges:
 		var far: Vector2 = corners[edge]
-		var face: Color = Color8(178, 118, 70) if edge == "bottom" else Color8(156, 102, 60)
+		var face: Color = _c("front_bottom") if edge == "bottom" else _c("front_right")
 		prop.draw_colored_polygon(PackedVector2Array([far, Vector2.ZERO, up, far + up]), face)
-		prop.draw_line(far + up, up, Color8(210, 160, 105), 3.0)   # the lighter top rail
+		prop.draw_line(far + up, up, _c("front_rail"), 3.0)   # the lighter top rail

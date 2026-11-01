@@ -17,7 +17,7 @@ extends Camera2D
 signal tapped(world_pos: Vector2)
 
 # Godot zoom: 2.0 = everything twice as big, 0.5 = half size.
-const MIN_ZOOM: float = 0.6   # low enough to see the biggest tavern whole
+const MIN_ZOOM: float = 0.3   # low enough to see most of the biggest Grand Hall
 const MAX_ZOOM: float = 2.0
 const WHEEL_STEP: float = 1.1
 # A finger has to move this many pixels before a tap becomes a drag,

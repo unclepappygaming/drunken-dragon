@@ -40,9 +40,10 @@ const SAVE_PATH: String = "user://save.json"
 # Bump this if the save format ever changes, so old saves can be handled.
 # Version 2 added recipes and the menu, version 3 lifetime stats (for
 # quests), version 4 expansions and the door, version 5 fame milestones,
-# version 6 named staff with types and looks, version 7 the kitchen zone.
+# version 6 named staff with types and looks, version 7 the kitchen zone,
+# version 8 the location (the tavern or the Grand Hall).
 # Older saves still load.
-const SAVE_VERSION: int = 7
+const SAVE_VERSION: int = 8
 
 # Everything the player can build. The key ("table") is the ID the
 # other scripts use; the inner Dictionary holds its details.
@@ -147,6 +148,7 @@ const MILESTONES: Array = [
 	{"id": "expand_1", "stat": "expansions", "goal": 1, "fame": 3, "text": "Expand the tavern"},
 	{"id": "expand_4", "stat": "expansions", "goal": 4, "fame": 5, "text": "Build the full-size tavern"},
 	{"id": "triumph_1", "stat": "triumphs", "goal": 1, "fame": 3, "text": "Host a triumphant banquet"},
+	{"id": "grand_hall", "stat": "moved", "goal": 1, "fame": 5, "text": "Move to the Grand Hall"},
 ]
 
 # [fame needed, title]. Your rank is the last one you've reached.
@@ -172,6 +174,26 @@ const EXPANSIONS: Array = [
 		"title": "The Grand Hall", "task": "Have 2 perfect days (no walk-outs, 20+ guests)"},
 ]
 
+# THE GRAND HALL: once the tavern is Legendary and fully expanded, the
+# Dragon can move to a grand hall in the capital. Fame, recipes, stats
+# and staff come along; the furniture stays behind. The hall starts at
+# cols x rows and has expansions of its own (HALL_EXPANSIONS). Their
+# quests count only what happens in the hall ("hall_served" etc.).
+const GRAND_HALL: Dictionary = {"cost": 15000, "fame": 140, "cols": 16, "rows": 16}
+const HALL_PRICE_BONUS: float = 0.25   # city guests pay 25% more
+const HALL_EXPANSIONS: Array = [
+	{"cols": 18, "rows": 18, "cost": 6000, "stat": "hall_served", "goal": 300,
+		"title": "A Packed House", "task": "Serve 300 guests in the Grand Hall"},
+	{"cols": 20, "rows": 20, "cost": 9000, "stat": "hall_nobles", "goal": 20,
+		"title": "The Court's Favorite", "task": "Serve 20 nobles in the Grand Hall"},
+	{"cols": 22, "rows": 22, "cost": 13000, "stat": "hall_perfect_days", "goal": 3,
+		"title": "Flawless Service", "task": "Have 3 perfect days in the Grand Hall"},
+	{"cols": 24, "rows": 24, "cost": 18000, "stat": "hall_served", "goal": 1500,
+		"title": "Talk of the Capital", "task": "Serve 1500 guests in the Grand Hall"},
+]
+# Stats that also get a "hall_" count while you're in the Grand Hall.
+const HALL_STATS: Array[String] = ["served", "nobles", "perfect_days"]
+
 # ---------------------------------------------------------------------
 # GAME STATE
 # ---------------------------------------------------------------------
@@ -192,7 +214,8 @@ var menu: Array[String] = STARTER_RECIPES.duplicate()
 # {"served": 41, "nobles": 3, "dish:stew": 9, "perfect_days": 1, "best_fame": 27}
 var stats: Dictionary = {}
 
-var expansions_built: int = 0
+var expansions_built: int = 0   # in the current location
+var location: String = "tavern"   # "tavern" or "grand_hall"
 
 # Today's job applicants: role ("cook"/"waiter") -> Array of profiles.
 # New faces every day.
@@ -308,6 +331,7 @@ func reset() -> void:
 	menu = STARTER_RECIPES.duplicate()
 	stats = {}
 	expansions_built = 0
+	location = "tavern"
 	_applicants_day = -1
 	order_requests.clear()
 	order_queue.clear()
@@ -333,6 +357,7 @@ func save_game(layout: Array, door: Array, kitchen: Array, staff: Array) -> void
 		"door": door,
 		"kitchen": kitchen,
 		"expansions": expansions_built,
+		"location": location,
 		"staff": staff,
 		"recipes": known_recipes,
 		"menu": menu,
@@ -372,8 +397,10 @@ func load_game() -> Dictionary:
 	stats = saved_stats if typeof(saved_stats) == TYPE_DICTIONARY else {}
 	# Saves from before stats existed: count the fame they already have.
 	stats["best_fame"] = maxi(stat("best_fame"), fame)
+	# Saves from before the Grand Hall are in the tavern.
+	location = "grand_hall" if parsed.get("location", "") == "grand_hall" else "tavern"
 	# Saves from before expansions: the original floor.
-	expansions_built = clampi(int(parsed.get("expansions", 0)), 0, EXPANSIONS.size())
+	expansions_built = clampi(int(parsed.get("expansions", 0)), 0, expansion_list().size())
 	if version < 5:
 		# Older saves already earned fame the old way, so milestones they've
 		# passed are marked done without paying out again.
@@ -485,6 +512,8 @@ func stat(key: String) -> int:
 
 func add_stat(key: String, amount: int = 1) -> void:
 	stats[key] = stat(key) + amount
+	if in_hall() and key in HALL_STATS:
+		stats["hall_" + key] = stat("hall_" + key) + amount
 
 
 # Called when a guest pays and leaves happy.
@@ -531,19 +560,54 @@ func check_unlocks() -> Array[String]:
 # ---------------------------------------------------------------------
 # EXPANSIONS
 # ---------------------------------------------------------------------
+func in_hall() -> bool:
+	return location == "grand_hall"
+
+
+# This location's expansions.
+func expansion_list() -> Array:
+	return HALL_EXPANSIONS if in_hall() else EXPANSIONS
+
+
 # The floor size for the expansions built so far.
 func floor_size() -> Vector2i:
 	if expansions_built == 0:
+		if in_hall():
+			return Vector2i(GRAND_HALL["cols"], GRAND_HALL["rows"])
 		return Vector2i(TavernGrid.START_COLS, TavernGrid.START_ROWS)
-	var last: Dictionary = EXPANSIONS[expansions_built - 1]
+	var last: Dictionary = expansion_list()[expansions_built - 1]
 	return Vector2i(last["cols"], last["rows"])
 
 
-# The next expansion, or {} once the tavern is as big as it gets.
+# The next expansion, or {} once this place is as big as it gets.
 func next_expansion() -> Dictionary:
-	if expansions_built >= EXPANSIONS.size():
+	if expansions_built >= expansion_list().size():
 		return {}
-	return EXPANSIONS[expansions_built]
+	return expansion_list()[expansions_built]
+
+
+# The Grand Hall is offered once the tavern can't grow any more.
+func move_offered() -> bool:
+	return not in_hall() and expansions_built >= EXPANSIONS.size()
+
+
+# Why you can't move yet ("" if you can).
+func move_blocker() -> String:
+	if fame < GRAND_HALL["fame"]:
+		return "You need to be Legendary (%d fame) first." % GRAND_HALL["fame"]
+	if gold < GRAND_HALL["cost"]:
+		return "Not enough gold (%dg)." % GRAND_HALL["cost"]
+	return ""
+
+
+# Pays for the Grand Hall and moves in. main.gd sets up the new floor.
+func move_to_hall() -> bool:
+	if not move_offered() or move_blocker() != "" or not try_spend(GRAND_HALL["cost"]):
+		return false
+	location = "grand_hall"
+	expansions_built = 0
+	add_stat("moved")
+	return true
 
 
 func expansion_progress() -> int:
@@ -694,7 +758,11 @@ func busyness() -> float:
 # More fame = guests arrive more often (6 seconds at 0 fame, down to 2
 # at 100), and more often still during rushes. Turning guests away spoils
 # the daily review, so build more Tables and hire more staff as fame grows.
+# In the Grand Hall the crowds grow with the hall instead: every
+# expansion brings guests faster, down to about one a second.
 func get_spawn_interval() -> float:
+	if in_hall():
+		return max(1.0, 2.6 - 0.35 * expansions_built) / busyness()
 	return max(2.0, 6.0 - fame * 0.04) / busyness()
 
 

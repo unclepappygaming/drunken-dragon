@@ -29,6 +29,7 @@ signal staff_list_requested
 signal new_game_requested
 signal expand_requested
 signal widen_kitchen_requested
+signal move_requested   # move to the Grand Hall (after a second tap)
 
 const TOP_HEIGHT: int = 150
 const BAR_HEIGHT: int = 120
@@ -55,6 +56,7 @@ var _summary_panel: PanelContainer
 var _summary_label: Label
 var _new_game_button: Button
 var _new_game_armed: bool = false   # true after the first tap
+var _move_armed: bool = false       # the same for moving to the Grand Hall
 var _recipe_panel: PanelContainer
 var _recipe_header: Label
 var _recipe_list: VBoxContainer
@@ -158,6 +160,21 @@ func show_summary(text: String, allow_new_game: bool = false) -> void:
 
 func close_expand_panel() -> void:
 	_expand_panel.visible = false
+	_move_armed = false
+
+
+# Builds the next expansion, or (once the tavern is full size) moves to
+# the Grand Hall. Moving can't be undone, so it asks for a second tap.
+func _on_expand_button() -> void:
+	if not GameManager.move_offered():
+		expand_requested.emit()
+		return
+	if not _move_armed:
+		_move_armed = true
+		_expand_button.text = "Tap again to move!"
+		return
+	_move_armed = false
+	move_requested.emit()
 
 
 # The fourth bottom button: "Open Day 3" between days, greyed out while open.
@@ -601,7 +618,7 @@ func _build_expand_panel() -> void:
 	vbox.add_child(_expand_label)
 
 	_expand_button = _make_button("Build", 28, vbox, 90)
-	_expand_button.pressed.connect(expand_requested.emit)
+	_expand_button.pressed.connect(_on_expand_button)
 	_widen_button = _make_button("Widen Kitchen", 24, vbox, 80)
 	_widen_button.pressed.connect(func():
 		widen_kitchen_requested.emit()
@@ -617,20 +634,31 @@ func _refresh_expand_panel() -> void:
 	var kitchen_text: String = ""
 	if grid != null:
 		var wide: int = grid.kitchen_width
-		kitchen_text = "\n\nKitchen: %d squares wide (up to %d)" % [wide, TavernGrid.KITCHEN_MAX_WIDTH]
-		_widen_button.visible = wide < TavernGrid.KITCHEN_MAX_WIDTH
+		kitchen_text = "\n\nKitchen: %d squares wide (up to %d)" % [wide, grid.kitchen_max_width()]
+		_widen_button.visible = wide < grid.kitchen_max_width()
 		_widen_button.text = "Widen Kitchen (%dg)" % TavernGrid.KITCHEN_WIDEN_COST
 		_widen_button.disabled = GameManager.gold < TavernGrid.KITCHEN_WIDEN_COST
 
+	var place: String = "the Grand Hall" if GameManager.in_hall() else "the Tavern"
 	var next: Dictionary = GameManager.next_expansion()
+	if next.is_empty() and GameManager.move_offered():
+		var hall: Dictionary = GameManager.GRAND_HALL
+		_expand_label.text = "The Grand Hall\n\nYour tavern can't grow any more. In the capital, a grand hall is for sale: %d x %d to start, growing to 24 x 24. City guests pay 25%% more. Fame, recipes and staff come along; the furniture stays behind.\n\nNeeds: Legendary (%d/%d fame)\nCost: %dg" % [
+			hall["cols"], hall["rows"], mini(GameManager.fame, hall["fame"]), hall["fame"], hall["cost"]] + kitchen_text
+		_expand_button.visible = true
+		var blocker: String = GameManager.move_blocker()
+		_expand_button.disabled = blocker != ""
+		if not _move_armed:
+			_expand_button.text = "Move (%dg)" % hall["cost"] if blocker == "" else "Not yet"
+		return
 	if next.is_empty():
-		_expand_label.text = "Expand the Tavern\n\nYour tavern is as big as it gets!" + kitchen_text
+		_expand_label.text = "Expand %s\n\nIt's as big as it gets!" % place + kitchen_text
 		_expand_button.visible = false
 		return
 	var size: Vector2i = GameManager.floor_size()
 	var done: bool = GameManager.expansion_quest_done()
-	_expand_label.text = "Expand the Tavern\n\nFloor: %d x %d  ->  %d x %d\n\nQuest: %s\n%s (%d/%d)%s\n\nCost: %dg" % [
-		size.x, size.y, next["cols"], next["rows"],
+	_expand_label.text = "Expand %s\n\nFloor: %d x %d  ->  %d x %d\n\nQuest: %s\n%s (%d/%d)%s\n\nCost: %dg" % [
+		place, size.x, size.y, next["cols"], next["rows"],
 		next["title"], next["task"], GameManager.expansion_progress(), next["goal"],
 		"  Done!" if done else "",
 		next["cost"],
