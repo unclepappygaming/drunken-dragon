@@ -111,6 +111,11 @@ three Hearths and eight tables.
 - Up to 12 cooks and 12 waiters, and the kitchen can widen to 12 squares.
 - Marble floors, stone walls with crimson panelling, gold trim and banners.
 
+**Test shortcut:** tap the Gold counter 5 times quickly (between days) to
+jump to a Legendary, full-size tavern with every recipe, 4 cooks, 4
+waiters and enough gold to move. It's switched on by `TEST_SHORTCUT` in
+`scripts/hud.gd`; turn that off before releasing the game.
+
 The game saves automatically between days. **New Game** on the day summary
 erases the save (it asks twice).
 

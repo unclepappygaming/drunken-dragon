@@ -30,6 +30,11 @@ signal new_game_requested
 signal expand_requested
 signal widen_kitchen_requested
 signal move_requested   # move to the Grand Hall (after a second tap)
+# TEST SHORTCUT: tapping the gold 5 times quickly jumps ahead to a
+# Legendary, fully expanded tavern, ready to move to the Grand Hall.
+# Turn TEST_SHORTCUT off before releasing the game.
+signal skip_ahead_requested
+const TEST_SHORTCUT: bool = true
 
 const TOP_HEIGHT: int = 150
 const BAR_HEIGHT: int = 120
@@ -57,6 +62,7 @@ var _summary_label: Label
 var _new_game_button: Button
 var _new_game_armed: bool = false   # true after the first tap
 var _move_armed: bool = false       # the same for moving to the Grand Hall
+var _gold_taps: Array[int] = []     # times of recent taps on the gold (msec)
 var _recipe_panel: PanelContainer
 var _recipe_header: Label
 var _recipe_list: VBoxContainer
@@ -186,6 +192,18 @@ func set_day_button(text: String, enabled: bool) -> void:
 # ---------------------------------------------------------------------
 # Signal handlers
 # ---------------------------------------------------------------------
+# Phones send a touch as a mouse click too, so clicks cover both.
+func _on_gold_input(event: InputEvent) -> void:
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	var now: int = Time.get_ticks_msec()
+	_gold_taps = _gold_taps.filter(func(t): return now - t < 2000)
+	_gold_taps.append(now)
+	if _gold_taps.size() >= 5:
+		_gold_taps.clear()
+		skip_ahead_requested.emit()
+
+
 func _on_gold_changed(amount: int) -> void:
 	_gold_label.text = "Gold: %d" % amount
 	# Red when in debt.
@@ -387,6 +405,9 @@ func _build_top_bar() -> void:
 	vbox.add_child(row)
 	_gold_label = _make_label(34)
 	_gold_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if TEST_SHORTCUT:
+		_gold_label.mouse_filter = Control.MOUSE_FILTER_STOP
+		_gold_label.gui_input.connect(_on_gold_input)
 	row.add_child(_gold_label)
 	_fame_label = _make_label(28)
 	row.add_child(_fame_label)

@@ -61,6 +61,7 @@ func _ready() -> void:
 	hud.expand_requested.connect(_on_expand_requested)
 	hud.widen_kitchen_requested.connect(grid.try_widen_kitchen)
 	hud.move_requested.connect(_on_move_requested)
+	hud.skip_ahead_requested.connect(_on_skip_ahead)
 	hud.grid = grid
 	# You can connect a signal straight to another node's function.
 	grid.build_message.connect(hud.show_message)
@@ -352,6 +353,35 @@ func _on_move_requested() -> void:
 	_update_staff_display()
 	_save_if_closed()
 	hud.show_summary("Welcome to\nthe Grand Hall!\n\nThe Drunken Dragon has moved to the capital. Your fame, recipes and staff came along; the furniture stayed behind.\n\nCity guests pay 25%% more, and the crowds grow with every expansion. You can hire up to %d of each kind of staff." % HALL_MAX_STAFF)
+
+
+# TEST SHORTCUT (see hud.gd): jump to a Legendary tavern at full size,
+# with every common recipe, a bigger crew and enough gold to move.
+func _on_skip_ahead() -> void:
+	if GameManager.is_open or _waiting_for_last_guests:
+		hud.show_message("Test shortcut: use it between days.")
+		return
+	if GameManager.in_hall():
+		hud.show_message("Test shortcut: you're already in the Grand Hall.")
+		return
+	GameManager.change_fame(maxi(0, GameManager.GRAND_HALL["fame"] - GameManager.fame))
+	GameManager.stats["best_rank"] = GameManager.RANKS.size() - 1
+	if GameManager.expansions_built < GameManager.EXPANSIONS.size():
+		GameManager.expansions_built = GameManager.EXPANSIONS.size()
+		var size: Vector2i = GameManager.floor_size()
+		grid.resize(size.x, size.y)
+		_fit_camera()
+	for id in GameManager.RECIPES:
+		if not GameManager.known_recipes.has(id):
+			GameManager.known_recipes.append(id)
+	for role in ["cook", "waiter"]:
+		while get_tree().get_nodes_in_group(role + "s").size() < 4:
+			_hire(StaffProfiles.random_profile(role))
+	GameManager.refund(maxi(0, GameManager.GRAND_HALL["cost"] + 2000 - GameManager.gold))
+	GameManager.recipes_changed.emit()
+	_update_staff_display()
+	_save_if_closed()
+	hud.show_message("Test shortcut: Legendary! Build -> Expand to move.", 6.0)
 
 
 # The street around the building: country green, or city cobbles.
