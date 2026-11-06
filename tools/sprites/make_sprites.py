@@ -306,6 +306,8 @@ def bonnet():
     return layer
 
 
+# Waiters carry an empty tray; the game draws what's on it (a plate of
+# food, a mug for drinks, or dirty plates), see waiter.gd.
 def tray(mug=True, plate=False):
     def layer(img, view, y0, step):
         if view == "back":
@@ -368,7 +370,7 @@ WAITERS = {
         legs=(60, 50, 45, 255), shoes=(40, 30, 25, 255),
         layers=[vest((45, 95, 70, 255), (245, 242, 232, 255)), apron((235, 228, 210, 255), y_from=6)],
         head_layers=[hair((160, 100, 50, 255))],
-        props=[tray()],
+        props=[tray(mug=False)],
     ),
     "B. Serving Maid": dict(
         dress=True,
@@ -376,7 +378,7 @@ WAITERS = {
         legs=(70, 105, 170, 255), shoes=(60, 40, 35, 255),
         layers=[apron((248, 245, 236, 255), full=True)],
         head_layers=[hair((180, 120, 60, 255), style="braid"), bonnet()],
-        props=[tray()],
+        props=[tray(mug=False)],
     ),
     "C. Halfling Server": dict(
         small=True,
@@ -384,7 +386,7 @@ WAITERS = {
         legs=(110, 85, 60, 255), shoes=(150, 100, 70, 255),   # big bare halfling feet
         layers=[vest((200, 150, 50, 255), (245, 240, 225, 255))],
         head_layers=[hair((95, 60, 35, 255), style="curly")],
-        props=[tray(mug=True)],
+        props=[tray(mug=False)],
     ),
 }
 

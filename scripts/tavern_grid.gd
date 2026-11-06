@@ -394,7 +394,8 @@ func standby_cell(asker: Node) -> Vector2i:
 			var spot := Vector2i(x, y)
 			if furniture.has(spot) or spot == door_cell or in_use.has(spot) or spot == expo_front():
 				continue
-			if cook != (in_kitchen(spot) and spot.y == kitchen_pos.y):
+			# Cooks wait in the aisle; waiters anywhere outside the kitchen.
+			if cook != (in_kitchen(spot) and spot.y == kitchen_pos.y) or (not cook and in_kitchen(spot)):
 				continue
 			var score: float = Vector2(spot).distance_to(anchor)
 			for side in SIDES:
@@ -553,6 +554,13 @@ func claim_ready_plate(waiter: Waiter) -> bool:
 			plate["taker"] = waiter
 			return true
 	return false
+
+
+# A waiter who can't deliver lets go of their plate, so another can take it.
+func release_plate_claim(waiter: Waiter) -> void:
+	for plate in expo_plates:
+		if plate["taker"] == waiter:
+			plate["taker"] = null
 
 
 # Is the plate this waiter claimed still there?
@@ -721,7 +729,7 @@ func _move_staff_aside() -> void:
 		var here: Vector2i = walker.current_cell()
 		if here == NO_CELL or not furniture.has(here):
 			continue
-		var spot: Vector2i = _nearest_open_cell(here)
+		var spot: Vector2i = nearest_open_cell(here)
 		if spot != NO_CELL:
 			walker.stop()
 			walker.end_standby()
@@ -729,7 +737,8 @@ func _move_staff_aside() -> void:
 
 
 # The closest square nobody's furniture is on (rings outward from `from`).
-func _nearest_open_cell(from: Vector2i) -> Vector2i:
+# Also used by walkers who find themselves standing in furniture.
+func nearest_open_cell(from: Vector2i) -> Vector2i:
 	for radius in range(1, maxi(cols, rows)):
 		for dx in range(-radius, radius + 1):
 			for dy in range(-radius, radius + 1):
@@ -1275,12 +1284,13 @@ func _draw_table(prop: FloorProp) -> void:
 	var full: int = dishes.get("full", 0)
 	var dirty: int = dishes.get("dirty", 0)
 	for i in mini(full + dirty, PLATE_SPOTS.size()):
-		_draw_plate(prop, Vector2(0, -TABLE_TOP) + PLATE_SPOTS[i], i < full)
+		draw_plate(prop, Vector2(0, -TABLE_TOP) + PLATE_SPOTS[i], i < full)
 
 
 # A plate seen from above at the isometric angle (squashed to half height).
-func _draw_plate(prop: CanvasItem, at: Vector2, with_food: bool) -> void:
-	prop.draw_set_transform(at, 0.0, Vector2(1.0, 0.5))
+# Also used by waiters for the plates on their tray (smaller `size`).
+func draw_plate(prop: CanvasItem, at: Vector2, with_food: bool, size: float = 1.0) -> void:
+	prop.draw_set_transform(at, 0.0, Vector2(size, size * 0.5))
 	prop.draw_circle(Vector2.ZERO, 12.0, Color8(40, 26, 20))     # outline
 	prop.draw_circle(Vector2.ZERO, 11.0, Color8(245, 242, 232))
 	if with_food:
@@ -1319,7 +1329,7 @@ func _draw_hearth(prop: FloorProp) -> void:
 func _draw_expo(prop: FloorProp) -> void:
 	_draw_art(prop, PASS_ART)
 	for i in expo_plates.size():
-		_draw_plate(prop, Vector2(-14 + i * 14, -28 + (i % 2) * 5), true)
+		draw_plate(prop, Vector2(-14 + i * 14, -28 + (i % 2) * 5), true)
 
 
 func _draw_front_wall(prop: FloorProp) -> void:

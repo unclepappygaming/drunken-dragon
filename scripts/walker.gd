@@ -221,6 +221,13 @@ func _plan_route() -> void:
 
 	# find_path gives a list of squares; we walk to the middle of each.
 	var cells: Array[Vector2i] = grid.find_path(start, goal, self is Cook)
+	if cells.is_empty() and grid.furniture.has(start):
+		# Standing where furniture now is (it was built or moved around
+		# us): step onto the nearest open square and try again.
+		var spot: Vector2i = grid.nearest_open_cell(start)
+		if spot != TavernGrid.NO_CELL:
+			position = grid.cell_center(spot)
+			cells = grid.find_path(spot, goal, self is Cook)
 	if cells.is_empty():
 		_stuck = true
 		return

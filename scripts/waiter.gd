@@ -34,11 +34,14 @@ const CLEAR_TIME: float = 0.8
 const SMOOTH_TALK_PATIENCE: float = 10.0
 const LUCKY_CHANCE: float = 1.0 / 3.0
 const LUCKY_TIP: float = 0.5
+# Dishes that are carried as a mug instead of a plate.
+const DRINKS: Array[String] = ["ale", "mead", "wine"]
 
 var state: State = State.IDLE
 
 var _guest: Customer = null                 # who we're working for
 var _table: Vector2i = TavernGrid.NO_CELL   # the table we're clearing
+var _pause: float = 0.0   # after a job we couldn't reach: wait before the next
 var _timer: float = 0.0
 var profile: Dictionary = {}
 
@@ -58,9 +61,17 @@ func setup(tavern_grid: TavernGrid, start_pos: Vector2, who: Dictionary) -> void
 
 
 func _process(delta: float) -> void:
+	# If there's no way to where we're going, drop the job (and any plate
+	# or table we'd claimed) so someone else can do it, rather than
+	# standing frozen while the guest gives up.
+	if _stuck and state != State.IDLE and state != State.LEAVING:
+		_give_up()
+		_pause = 1.0   # so another waiter gets the job first
 	match state:
 		State.IDLE:
-			_find_task()
+			_pause -= delta
+			if _pause <= 0.0:
+				_find_task()
 			if state == State.IDLE:
 				idle_standby(delta)   # nothing to do: wait inside, out of the way
 
@@ -134,6 +145,7 @@ func _process(delta: float) -> void:
 func leave() -> void:
 	remove_from_group("waiters")
 	grid.release_busser(self)
+	grid.release_plate_claim(self)
 	state = State.LEAVING
 	go_out_door()
 
@@ -165,7 +177,11 @@ func _find_task() -> void:
 
 func _give_up() -> void:
 	_guest = null
+	_table = TavernGrid.NO_CELL
+	grid.release_plate_claim(self)
+	grid.release_busser(self)
 	stop()
+	end_standby()
 	state = State.IDLE
 
 
@@ -176,4 +192,40 @@ func _guest_is(guest_state: Customer.State) -> bool:
 
 
 func _draw() -> void:
-	draw_sprite(state == State.CARRYING or state == State.RETURNING)
+	var carrying: bool = state == State.CARRYING or state == State.RETURNING
+	draw_sprite(carrying)
+	if not carrying:
+		return
+	# The sheet only has an empty tray; put what we're carrying on it.
+	var tray: Vector2 = _tray_spot()
+	if state == State.RETURNING:
+		# Dirty plates, stacked, on the way back to the pass.
+		grid.draw_plate(self, tray + Vector2(0, -2), false, 0.7)
+		grid.draw_plate(self, tray + Vector2(0, -5), false, 0.7)
+	elif is_instance_valid(_guest) and _guest.order.get("id", "") in DRINKS:
+		_draw_mug(tray)
+	else:
+		grid.draw_plate(self, tray + Vector2(0, -3), true, 0.75)
+
+
+# Where the top of the tray is in each pose (it matches the sprite sheet:
+# held out to the right, over the shoulder from behind; lower for halflings).
+func _tray_spot() -> Vector2:
+	var spot: Vector2
+	match _facing:
+		"right": spot = Vector2(12, -8)
+		"left": spot = Vector2(-12, -8)
+		"back": spot = Vector2(17, -18)
+		_: spot = Vector2(16, -8)
+	if profile.get("type", "") == "halfling":
+		spot.y += 8
+	return spot
+
+
+# A mug of something, with foam on top, standing on the tray.
+func _draw_mug(tray: Vector2) -> void:
+	var outline := Color8(40, 26, 20)
+	draw_rect(Rect2(tray + Vector2(-6, -15), Vector2(12, 15)), outline)
+	draw_rect(Rect2(tray + Vector2(-5, -14), Vector2(10, 13)), Color8(205, 140, 50))
+	draw_rect(Rect2(tray + Vector2(-5, -14), Vector2(10, 4)), Color8(250, 245, 225))
+	draw_rect(Rect2(tray + Vector2(6, -11), Vector2(3, 7)), outline)   # handle
