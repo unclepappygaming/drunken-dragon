@@ -101,6 +101,10 @@ var hearths: Dictionary = {}
 # AStarGrid2D is Godot's built-in pathfinder for square grids. We mark
 # furniture squares as "solid" and it finds the shortest way around them.
 var _astar := AStarGrid2D.new()
+# Cooks get their own copy without the kitchen's extra walking cost, so
+# they walk straight along the aisle to the pass instead of looping out
+# through the dining room. Both always have the same solid squares.
+var _cook_astar := AStarGrid2D.new()
 
 # The y-sorted node that holds every FloorProp (see main.tscn).
 @onready var _props_node: Node2D = get_node("../Props")
@@ -109,10 +113,11 @@ var _wall_props: Array[FloorProp] = []
 
 
 func _ready() -> void:
-	_astar.cell_size = Vector2.ONE   # only the square numbers matter
-	# Diagonal steps are allowed, but never squeezing between two pieces
-	# of furniture or cutting a corner.
-	_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
+	for finder in [_astar, _cook_astar]:
+		finder.cell_size = Vector2.ONE   # only the square numbers matter
+		# Diagonal steps are allowed, but never squeezing between two pieces
+		# of furniture or cutting a corner.
+		finder.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
 	_apply_size()
 
 	# A free starter layout so Day 1 works right away: the kitchen along
@@ -184,10 +189,11 @@ func get_door() -> Array:
 # Rebuilds the pathfinder for the current size. AStarGrid2D.update()
 # forgets which squares are solid, so the furniture is marked again.
 func _apply_size() -> void:
-	_astar.region = Rect2i(0, 0, cols, rows)
-	_astar.update()
+	for finder in [_astar, _cook_astar]:
+		finder.region = Rect2i(0, 0, cols, rows)
+		finder.update()
 	for cell in furniture:
-		_astar.set_point_solid(cell, true)
+		_set_solid(cell, true)
 	_mark_kitchen()
 	_rebuild_front_walls()
 	queue_redraw()
@@ -295,10 +301,17 @@ func cell_at_world(world_pos: Vector2) -> Vector2i:
 
 # The squares to walk through, start and goal included.
 # Empty if there's no way to get there.
-func find_path(from_cell: Vector2i, to_cell: Vector2i) -> Array[Vector2i]:
-	if _astar.is_point_solid(from_cell) or _astar.is_point_solid(to_cell):
+# for_cook: use the cooks' pathfinder (no detours around the kitchen).
+func find_path(from_cell: Vector2i, to_cell: Vector2i, for_cook: bool = false) -> Array[Vector2i]:
+	var finder: AStarGrid2D = _cook_astar if for_cook else _astar
+	if finder.is_point_solid(from_cell) or finder.is_point_solid(to_cell):
 		return []
-	return _astar.get_id_path(from_cell, to_cell)
+	return finder.get_id_path(from_cell, to_cell)
+
+
+func _set_solid(cell: Vector2i, solid: bool) -> void:
+	_astar.set_point_solid(cell, solid)
+	_cook_astar.set_point_solid(cell, solid)
 
 
 # The best free square beside a piece of furniture to stand on, for
@@ -333,6 +346,35 @@ func access_cell(furniture_cell: Vector2i, from_pos: Vector2, asker: Node = null
 		if score < best_score:
 			best_score = score
 			best = spot
+	return best
+
+
+# Two free squares on opposite sides of a table (left and right, or front
+# and back), so a pair can sit facing each other. Returns the two squares,
+# or [] if no opposite pair is free; the closer pair wins.
+func opposite_seats(table: Vector2i, from_pos: Vector2) -> Array[Vector2i]:
+	var start: Vector2i = cell_at_world(from_pos)
+	if start == NO_CELL:
+		start = door_cell
+	var in_use: Dictionary = _cells_in_use(null)
+	var best: Array[Vector2i] = []
+	var best_score: float = INF
+	for side in [Vector2i(1, 0), Vector2i(0, 1)]:
+		var seats: Array[Vector2i] = [table - side, table + side]
+		var score: float = 0.0
+		for spot in seats:
+			if not _in_bounds(spot) or furniture.has(spot) or in_kitchen(spot) \
+					or spot == expo_front() or spot == door_cell or in_use.has(spot):
+				score = INF
+				break
+			var route: Array[Vector2i] = find_path(start, spot)
+			if route.is_empty():
+				score = INF
+				break
+			score += route.size()
+		if score < best_score:
+			best_score = score
+			best = seats
 	return best
 
 
@@ -862,7 +904,7 @@ func _try_build(cell: Vector2i) -> void:
 
 func _place(cell: Vector2i, type: String) -> void:
 	furniture[cell] = type
-	_astar.set_point_solid(cell, true)   # nobody can walk through it now
+	_set_solid(cell, true)   # nobody can walk through it now
 	if type == "table":
 		table_owner[cell] = null
 	elif type == "kitchen":
@@ -939,7 +981,7 @@ func _try_remove(cell: Vector2i) -> void:
 	_bussers.erase(cell)
 	hearths.erase(cell)
 	_remove_prop(cell)
-	_astar.set_point_solid(cell, false)
+	_set_solid(cell, false)
 	layout_changed.emit()
 	build_message.emit("Sold for %dg." % refund)
 

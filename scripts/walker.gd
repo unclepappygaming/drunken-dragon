@@ -220,7 +220,7 @@ func _plan_route() -> void:
 		return
 
 	# find_path gives a list of squares; we walk to the middle of each.
-	var cells: Array[Vector2i] = grid.find_path(start, goal)
+	var cells: Array[Vector2i] = grid.find_path(start, goal, self is Cook)
 	if cells.is_empty():
 		_stuck = true
 		return

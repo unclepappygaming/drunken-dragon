@@ -50,14 +50,29 @@ const TYPES: Dictionary = {
 
 # How often each type walks in, out of the total, and the fame needed
 # before they start coming. Nobles only come to banquets; the Old
-# Regular comes at most once a day.
+# Regular comes at most once a day. A "pair" is two guests of one common
+# type (see PAIR_TYPES) who share a table, sitting across from each other.
 const ARRIVALS: Array = [
-	{"type": "farmer", "weight": 45, "fame": 0},
+	{"type": "farmer", "weight": 35, "fame": 0},
+	{"type": "pair", "weight": 15, "fame": 0},
 	{"type": "guard", "weight": 20, "fame": 0},
 	{"type": "merchant", "weight": 15, "fame": 0},
 	{"type": "regular", "weight": 8, "fame": 0},
 	{"type": "adventurer", "weight": 12, "fame": 10},
 ]
+
+# Who comes as a pair, and how often (weights).
+const PAIR_TYPES: Dictionary = {"farmer": 60, "merchant": 25, "guard": 15}
+
+
+static func pick_pair_type() -> String:
+	var roll: int = randi() % 100
+	for type in PAIR_TYPES:
+		roll -= PAIR_TYPES[type]
+		if roll < 0:
+			return type
+	return "farmer"
+
 
 # Guard tip for fast service: served with more than half their patience left.
 const GUARD_TIP: float = 0.3

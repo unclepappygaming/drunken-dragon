@@ -165,7 +165,9 @@ func _on_spawn_timer_timeout() -> void:
 	var type: String = GuestTypes.pick_arrival(GameManager.fame, not _regular_came_today)
 	var cell: Vector2i = grid.find_free_table()
 	# Nobody jumps the line: a free table goes to the line first.
-	if cell != TavernGrid.NO_CELL and _line.is_empty():
+	if type == "pair":
+		_pair_arrives(cell)
+	elif cell != TavernGrid.NO_CELL and _line.is_empty():
 		if type == "adventurer":
 			_seat_party(cell)
 		else:
@@ -198,24 +200,56 @@ func _spawn_customer(type: String) -> Customer:
 	return customer
 
 
-func _seat(customer: Customer, cell: Vector2i) -> void:
+func _seat(customer: Customer, cell: Vector2i, seat: Vector2i = TavernGrid.NO_CELL) -> void:
 	grid.reserve_table(cell, customer)
 	_table_guests[cell] = _table_guests.get(cell, 0) + 1
-	customer.take_table(cell)
+	customer.take_table(cell, seat)
 
 
-# Two or three adventurers sharing one table. They all hold the same
+# A group sharing one table: the first two sit across from each other
+# when there's room on both sides; anyone else finds a free side.
+func _seat_group(members: Array, cell: Vector2i) -> void:
+	var seats: Array[Vector2i] = grid.opposite_seats(cell, members[0].position)
+	for i in members.size():
+		_seat(members[i], cell, seats[i] if i < seats.size() else TavernGrid.NO_CELL)
+
+
+# `count` guests of one type who arrive together. They all hold the same
 # `party` list, so if one storms off the rest follow.
-func _seat_party(cell: Vector2i) -> void:
+func _spawn_group(type: String, count: int) -> Array:
 	var members: Array = []
-	for i in randi_range(2, 3):
-		var adventurer: Customer = _spawn_customer("adventurer")
+	for i in count:
+		var guest: Customer = _spawn_customer(type)
 		# Stagger them along the outside wall so they file in one by one.
-		adventurer.position += grid.line_direction() * (i * 26.0)
-		adventurer.party = members
-		members.append(adventurer)
-		_seat(adventurer, cell)
+		guest.position += grid.line_direction() * (i * 26.0)
+		guest.party = members
+		members.append(guest)
+	return members
+
+
+# Two or three adventurers sharing one table.
+func _seat_party(cell: Vector2i) -> void:
+	var members: Array = _spawn_group("adventurer", randi_range(2, 3))
+	_seat_group(members, cell)
 	hud.show_message("An adventuring party of %d walks in!" % members.size())
+
+
+# Two guests who came together. They take a table if one's free (and
+# nobody's waiting), otherwise they wait in line side by side.
+func _pair_arrives(cell: Vector2i) -> void:
+	if cell != TavernGrid.NO_CELL and _line.is_empty():
+		_seat_group(_spawn_group(GuestTypes.pick_pair_type(), 2), cell)
+		return
+	var room: int = MAX_LINE - _line.size()
+	if room <= 0:
+		GameManager.today_turned_away += 2
+		hud.show_message("The line is full! Two guests went elsewhere.")
+		return
+	# With room for only one, the other goes home without counting against you.
+	var members: Array = _spawn_group(GuestTypes.pick_pair_type(), mini(room, 2))
+	for guest in members:
+		_line.append(guest)
+		guest.wait_in_line(_line_spot(_line.size() - 1))
 
 
 # An invited noble. Nobles don't queue: they get the next free table,
@@ -245,7 +279,13 @@ func _seat_from_line() -> void:
 		var cell: Vector2i = grid.find_free_table()
 		if cell == TavernGrid.NO_CELL:
 			break
-		_seat(_line.pop_front(), cell)
+		# Anyone waiting with the first in line (a pair) sits with them.
+		var group: Array = [_line.pop_front()]
+		for friend in group[0].party:
+			if friend != group[0] and _line.has(friend):
+				_line.erase(friend)
+				group.append(friend)
+		_seat_group(group, cell)
 	for i in _line.size():
 		_line[i].move_up_in_line(_line_spot(i))
 

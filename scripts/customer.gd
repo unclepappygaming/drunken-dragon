@@ -100,14 +100,16 @@ func setup(tavern_grid: TavernGrid, type: String = "farmer") -> void:
 	add_to_group("customers")
 
 
-func take_table(cell: Vector2i) -> void:
+# `seat`: a square beside the table picked for us (pairs sit across from
+# each other); otherwise we find a free one ourselves.
+func take_table(cell: Vector2i, seat: Vector2i = TavernGrid.NO_CELL) -> void:
 	table_cell = cell
 	state = State.WALKING_IN
 	_bubble = ""
 	patience = MAX_PATIENCE * _patience_scale
 	_patience_max = patience
 	# Sit on a free square beside the table, not on top of it.
-	go_to_cell(grid.access_cell(cell, position, self))
+	go_to_cell(seat if seat != TavernGrid.NO_CELL else grid.access_cell(cell, position, self))
 
 
 func wait_in_line(spot: Vector2) -> void:

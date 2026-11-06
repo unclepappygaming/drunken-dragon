@@ -24,10 +24,12 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
   | Merchant | Patient, only orders tier 2 dishes, pays 20% more |
   | Old Regular | Walks slowly, comes once a day, always orders the same favorite dish |
   | Adventurers | From 10 fame: a party of 2-3 sharing one table. Tip 25%, but if one storms off they all leave |
+  | Pairs | Two farmers, merchants or guards who share a table, sitting across from each other. They wait in line together |
   | Lord / Lady | Only at Noble Banquets |
 - **The kitchen** is a zone 2 squares deep (grey stone floor). Hearths go
   on its front row; the **pass** (expo counter) is at the right end.
-- **Cooks** stand in the kitchen aisle behind their Hearth, always facing
+- **Cooks** walk straight along the kitchen aisle (never out through the
+  dining room), stand behind their Hearth, always facing
   the room. When a dish is done they carry it to the pass. The pass holds 3
   plates; if it's full, cooks wait.
 - **Waiters** take orders, collect dishes from the front of the pass (they
