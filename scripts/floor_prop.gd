@@ -16,8 +16,10 @@ extends Node2D
 
 var grid: TavernGrid
 var cell: Vector2i
-var kind: String = ""        # "table", "kitchen" or "wall"
+var kind: String = ""        # "table", "long_table", "chair", "kitchen", "expo" or "wall"
 var edges: Array = []        # walls only: which outer edges ("bottom", "right")
+var facing := Vector2i.ZERO  # chairs only: the way to the table
+var lift: float = 0.0        # how far the prop was moved down for y-sorting (drawn back up)
 
 
 func _draw() -> void:

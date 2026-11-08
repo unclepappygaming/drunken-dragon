@@ -67,6 +67,7 @@ var _patience_at_serve: float = 0.0  # for the Town Guard's quick-service tip
 # Speech bubble and patience bar live on their own layer above every
 # character, so one guest's bubble never darkens the guest behind it.
 var _overlay: Node2D
+var _seat: Vector2i = TavernGrid.NO_CELL   # our chair
 
 
 # Called by main.gd right after the guest is created. We can't pass
@@ -100,10 +101,11 @@ func setup(tavern_grid: TavernGrid, type: String = "farmer") -> void:
 	add_to_group("customers")
 
 
-# `seat`: a square beside the table picked for us (pairs sit across from
-# each other); otherwise we find a free one ourselves.
+# `seat`: the chair we're given (pairs sit across from each other).
+# Without one (shouldn't happen) we find a free square beside the table.
 func take_table(cell: Vector2i, seat: Vector2i = TavernGrid.NO_CELL) -> void:
 	table_cell = cell
+	_seat = seat
 	state = State.WALKING_IN
 	_bubble = ""
 	patience = MAX_PATIENCE * _patience_scale
@@ -155,7 +157,8 @@ func _process(delta: float) -> void:
 
 		State.WALKING_IN:
 			if _walk(delta):
-				face_toward(grid.cell_center(table_cell))
+				var top: Vector2i = grid.top_for_chair(_seat) if _seat != TavernGrid.NO_CELL else table_cell
+				face_toward(grid.cell_center(top))
 				state = State.DECIDING
 				_timer = DECIDE_TIME
 				_bubble = "..."
@@ -259,7 +262,10 @@ func _start_leaving(reason: String) -> void:
 # _draw() paints this node. (0, 0) is the guest's own position, so
 # everything is drawn relative to them.
 func _draw() -> void:
-	draw_sprite()
+	# On our chair we're drawn sitting (legs hidden by the chair).
+	var seated: bool = state in [State.DECIDING, State.WAITING_FOR_WAITER, State.WAITING_FOR_FOOD, State.EATING] \
+			and _seat != TavernGrid.NO_CELL and current_cell() == _seat and _path.is_empty()
+	draw_sprite(false, seated)
 
 
 # The patience bar under their feet and the speech bubble above their

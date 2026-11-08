@@ -12,7 +12,10 @@
 #     front walls are FloorProp nodes so people can walk behind them
 #   * handles taps to build/remove furniture and move the door
 #   * finds walking routes around the furniture (pathfinding)
-#   * tracks which tables are taken
+#   * tracks which tables are taken. A TABLE is a row of squares:
+#     chair, tabletop, chair (3 x 1, 2 seats). A LONG TABLE is two such
+#     rows side by side (3 x 2, 4 seats). Guests sit on the chairs; each
+#     group gets a whole table. Tables can run either way (build_dir).
 #   * holds the KITCHEN: a zone 2 squares deep. Cooks work from the back
 #     row (the aisle), facing the room; the front row is the line, with
 #     Hearths and, at the right end, the expo counter ("the pass")
@@ -50,8 +53,12 @@ const OUTWARD: Dictionary = {
 # one of these to use a piece of furniture.
 const SIDES: Array = [Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, -1)]
 
-# "" = not building. Otherwise "table", "kitchen", "remove" or "door".
+# "" = not building. Otherwise "table", "long_table", "kitchen", "remove",
+# "door" or "kitchen_move".
 var build_type: String = ""
+# Which way new tables run: (1, 0) = chairs at the left and right ends
+# along x (down-right on screen), (0, 1) = along y (down-left).
+var build_dir: Vector2i = Vector2i(1, 0)
 
 var cols: int = START_COLS
 var rows: int = START_ROWS
@@ -82,16 +89,24 @@ var kitchen_width: int = KITCHEN_START_WIDTH
 # Plates waiting on the pass, oldest first: {"guest": Customer, "taker": Waiter or null}
 var expo_plates: Array = []
 
-# Vector2i(column, row) -> furniture ID ("table", "kitchen" for a Hearth,
-# or "expo" for the pass, which comes with the kitchen)
+# Vector2i(column, row) -> furniture ID: "table" (a tabletop square),
+# "chair", "kitchen" for a Hearth, or "expo" for the pass (which comes
+# with the kitchen). Every one of these squares is solid.
 var furniture: Dictionary = {}
-# table cell -> the Customer sitting there, or null if free
+# TABLES: each is known by its first tabletop square, its "anchor".
+#   tables[anchor] = {"kind": "table" or "long_table", "dir": Vector2i,
+#                     "tops": [tabletop squares], "chairs": [chair squares]}
+# Chairs come in pairs facing each other across a tabletop: chairs[0]
+# and chairs[1] share the first tabletop, chairs[2] and [3] the second.
+var tables: Dictionary = {}
+var _table_of: Dictionary = {}   # every tabletop and chair square -> its table's anchor
+# table anchor -> the Customer who took it (the first of their group), or null if free
 var table_owner: Dictionary = {}
 # table cell -> {"full": plates being eaten, "dirty": empty plates left
 # behind}. A table with dirty plates can't seat anyone until a Waiter
 # clears it and takes the plates back to the kitchen.
 var table_dishes: Dictionary = {}
-var _bussers: Dictionary = {}        # table cell -> the Waiter coming to clear it
+var _bussers: Dictionary = {}        # table anchor -> the Waiter coming to clear it
 # hearth cell -> {
 #   "cook":        the Cook working it, or null
 #   "job":         {} when not cooking, or {"customer", "time_left", "total"}
@@ -124,8 +139,8 @@ func _ready() -> void:
 	# the back wall with one Hearth, and two tables.
 	_place(expo_cell(), "expo")
 	_place(Vector2i(5, 1), "kitchen")
-	_place(Vector2i(1, 3), "table")
-	_place(Vector2i(3, 5), "table")
+	_place_table("table", Vector2i(2, 4), Vector2i(1, 0))
+	_place_table("table", Vector2i(5, 6), Vector2i(1, 0))
 	_mark_kitchen()
 
 
@@ -302,11 +317,21 @@ func cell_at_world(world_pos: Vector2) -> Vector2i:
 # The squares to walk through, start and goal included.
 # Empty if there's no way to get there.
 # for_cook: use the cooks' pathfinder (no detours around the kitchen).
+# Chairs are solid, but a route may start or end on one (a guest sitting
+# down or getting up): those are opened just for this search.
 func find_path(from_cell: Vector2i, to_cell: Vector2i, for_cook: bool = false) -> Array[Vector2i]:
 	var finder: AStarGrid2D = _cook_astar if for_cook else _astar
-	if finder.is_point_solid(from_cell) or finder.is_point_solid(to_cell):
-		return []
-	return finder.get_id_path(from_cell, to_cell)
+	var opened: Array[Vector2i] = []
+	for cell in [from_cell, to_cell]:
+		if furniture.get(cell, "") == "chair" and finder.is_point_solid(cell):
+			finder.set_point_solid(cell, false)
+			opened.append(cell)
+	var route: Array[Vector2i] = []
+	if not finder.is_point_solid(from_cell) and not finder.is_point_solid(to_cell):
+		route = finder.get_id_path(from_cell, to_cell)
+	for cell in opened:
+		finder.set_point_solid(cell, true)
+	return route
 
 
 func _set_solid(cell: Vector2i, solid: bool) -> void:
@@ -331,51 +356,71 @@ func access_cell(furniture_cell: Vector2i, from_pos: Vector2, asker: Node = null
 		start = door_cell
 	var in_use: Dictionary = _cells_in_use(asker)
 
+	# A table is served from beside any of its tabletop squares.
+	var bases: Array = [furniture_cell]
+	if _table_of.has(furniture_cell):
+		bases = tables[_table_of[furniture_cell]]["tops"]
 	var best: Vector2i = NO_CELL
 	var best_score: float = INF
-	for side in SIDES:
-		var spot: Vector2i = furniture_cell + side
-		# Nobody sits in the kitchen or on the waiters' pickup spot.
-		if not _in_bounds(spot) or furniture.has(spot) or in_kitchen(spot) or spot == expo_front():
-			continue
-		var route: Array[Vector2i] = find_path(start, spot)
-		if route.is_empty():
-			continue
-		# A taken square still works, it just scores much worse.
-		var score: float = route.size() + (100.0 if in_use.has(spot) else 0.0)
-		if score < best_score:
-			best_score = score
-			best = spot
+	for base in bases:
+		for side in SIDES:
+			var spot: Vector2i = base + side
+			var score: float = _access_score(spot, start, in_use)
+			if score < best_score:
+				best_score = score
+				best = spot
 	return best
 
 
-# Two free squares on opposite sides of a table (left and right, or front
-# and back), so a pair can sit facing each other. Returns the two squares,
-# or [] if no opposite pair is free; the closer pair wins.
-func opposite_seats(table: Vector2i, from_pos: Vector2) -> Array[Vector2i]:
-	var start: Vector2i = cell_at_world(from_pos)
-	if start == NO_CELL:
-		start = door_cell
-	var in_use: Dictionary = _cells_in_use(null)
-	var best: Array[Vector2i] = []
-	var best_score: float = INF
-	for side in [Vector2i(1, 0), Vector2i(0, 1)]:
-		var seats: Array[Vector2i] = [table - side, table + side]
-		var score: float = 0.0
-		for spot in seats:
-			if not _in_bounds(spot) or furniture.has(spot) or in_kitchen(spot) \
-					or spot == expo_front() or spot == door_cell or in_use.has(spot):
-				score = INF
-				break
-			var route: Array[Vector2i] = find_path(start, spot)
-			if route.is_empty():
-				score = INF
-				break
-			score += route.size()
-		if score < best_score:
-			best_score = score
-			best = seats
-	return best
+# How good `spot` is to stand on (lower is better), INF if it can't be used.
+func _access_score(spot: Vector2i, start: Vector2i, in_use: Dictionary) -> float:
+	# Nobody stands in the kitchen or on the waiters' pickup spot.
+	if not _in_bounds(spot) or furniture.has(spot) or in_kitchen(spot) or spot == expo_front():
+		return INF
+	var route: Array[Vector2i] = find_path(start, spot)
+	if route.is_empty():
+		return INF
+	# A taken square still works, it just scores much worse.
+	return route.size() + (100.0 if in_use.has(spot) else 0.0)
+
+
+# ---------------------------------------------------------------------
+# Tables and chairs
+# ---------------------------------------------------------------------
+# The squares a table would cover: {"tops": [...], "chairs": [...]}.
+# `anchor` is the first tabletop; a long table's second row is beside it.
+static func table_footprint(kind: String, anchor: Vector2i, dir: Vector2i) -> Dictionary:
+	var across := Vector2i(dir.y, dir.x)   # the other way from the chairs
+	var tops: Array[Vector2i] = []
+	var chairs: Array[Vector2i] = []
+	for row in (2 if kind == "long_table" else 1):
+		var top: Vector2i = anchor + across * row
+		tops.append(top)
+		chairs.append(top - dir)
+		chairs.append(top + dir)
+	return {"tops": tops, "chairs": chairs}
+
+
+static func seats_at(kind: String) -> int:
+	return 4 if kind == "long_table" else 2
+
+
+# The chairs of the table at `anchor`, in seating order (the first two
+# face each other across the table).
+func table_chairs(anchor: Vector2i) -> Array[Vector2i]:
+	var chairs: Array[Vector2i] = []
+	if tables.has(anchor):
+		chairs.assign(tables[anchor]["chairs"])
+	return chairs
+
+
+# The tabletop square a chair faces.
+func top_for_chair(chair: Vector2i) -> Vector2i:
+	var table: Dictionary = tables.get(_table_of.get(chair, NO_CELL), {})
+	for top in table.get("tops", []):
+		if (top - chair).length_squared() == 1:
+			return top
+	return chair
 
 
 # Where staff with nothing to do wait: a free square near the kitchen
@@ -399,7 +444,7 @@ func standby_cell(asker: Node) -> Vector2i:
 				continue
 			var score: float = Vector2(spot).distance_to(anchor)
 			for side in SIDES:
-				if furniture.get(spot + side, "") == "table":
+				if furniture.get(spot + side, "") in ["table", "chair"]:
 					score += 10.0
 			choices.append([score, spot])
 	choices.sort_custom(func(a, b): return a[0] < b[0])
@@ -413,14 +458,31 @@ func standby_cell(asker: Node) -> Vector2i:
 	return NO_CELL
 
 
-func find_free_table() -> Vector2i:
-	var free: Array[Vector2i] = []
-	for cell in table_owner:
-		if table_owner[cell] == null and _is_clean(cell):
-			free.append(cell)
-	if free.is_empty():
+# A free, clean table with at least `group` seats, or NO_CELL. The
+# smallest table that fits wins, so long tables stay free for parties.
+func find_free_table(group: int = 1) -> Vector2i:
+	var best: Array[Vector2i] = []
+	var best_seats: int = 99
+	for anchor in table_owner:
+		var seats: int = seats_at(tables[anchor]["kind"])
+		if table_owner[anchor] != null or not _is_clean(anchor) or seats < group or seats > best_seats:
+			continue
+		if seats < best_seats:
+			best.clear()
+			best_seats = seats
+		best.append(anchor)
+	if best.is_empty():
 		return NO_CELL
-	return free.pick_random()
+	return best.pick_random()
+
+
+# The most seats any free table has right now (0 if none is free).
+func biggest_free_table() -> int:
+	var most: int = 0
+	for anchor in table_owner:
+		if table_owner[anchor] == null and _is_clean(anchor):
+			most = maxi(most, seats_at(tables[anchor]["kind"]))
+	return most
 
 
 func reserve_table(cell: Vector2i, customer: Customer) -> void:
@@ -635,8 +697,8 @@ func _kitchen_fits(pos: Vector2i, width: int, solid: Dictionary) -> String:
 func _layout_with_kitchen(pos: Vector2i, width: int) -> Dictionary:
 	var solid: Dictionary = {}
 	for cell in furniture:
-		if furniture[cell] == "table":
-			solid[cell] = "table"
+		if furniture[cell] in ["table", "chair"]:
+			solid[cell] = furniture[cell]
 	for cell in hearths:
 		var slot: int = cell.x - kitchen_pos.x
 		solid[Vector2i(pos.x + slot, pos.y + 1)] = "kitchen"
@@ -655,7 +717,7 @@ func _try_move_kitchen(cell: Vector2i) -> void:
 		return
 	var tables: Dictionary = {}
 	for spot in furniture:
-		if furniture[spot] == "table":
+		if furniture[spot] in ["table", "chair"]:
 			tables[spot] = true
 	var problem: String = _kitchen_fits(cell, kitchen_width, tables)
 	if problem != "":
@@ -675,7 +737,8 @@ func kitchen_max_width() -> int:
 
 
 # Moving into the Grand Hall: an empty floor of the new size with a
-# starter layout (a 6-wide kitchen with three Hearths, and eight tables).
+# starter layout (a 6-wide kitchen with three Hearths, six tables and two
+# long tables).
 # Staff keep their jobs and find their new places.
 func start_grand_hall(new_cols: int, new_rows: int) -> void:
 	wash_all_tables()
@@ -687,8 +750,9 @@ func start_grand_hall(new_cols: int, new_rows: int) -> void:
 	set_door("bottom", new_cols / 2)
 	var layout: Array = [[5, 1, "kitchen"], [6, 1, "kitchen"], [7, 1, "kitchen"]]
 	for y in [5, 9]:
-		for x in [2, 5, 8, 11]:
-			layout.append([x, y, "table"])
+		for x in [2, 6, 10]:
+			layout.append([x, y, "table", "x"])
+		layout.append([13, y - 1, "long_table", "x"])
 	load_layout(layout, [5, 0, 6])
 	_move_staff_aside()
 	layout_changed.emit()
@@ -704,7 +768,7 @@ func try_widen_kitchen() -> void:
 		return
 	var tables: Dictionary = {}
 	for spot in furniture:
-		if furniture[spot] == "table":
+		if furniture[spot] in ["table", "chair"]:
 			tables[spot] = true
 	var problem: String = _kitchen_fits(kitchen_pos, kitchen_width + 1, tables)
 	if problem != "":
@@ -727,7 +791,7 @@ func try_widen_kitchen() -> void:
 func _move_staff_aside() -> void:
 	for walker in get_tree().get_nodes_in_group("walkers"):
 		var here: Vector2i = walker.current_cell()
-		if here == NO_CELL or not furniture.has(here):
+		if here == NO_CELL or not furniture.has(here) or walker is Customer:
 			continue
 		var spot: Vector2i = nearest_open_cell(here)
 		if spot != NO_CELL:
@@ -757,7 +821,7 @@ func _rebuild_kitchen(pos: Vector2i, width: int) -> void:
 		if is_instance_valid(hearths[cell]["cook"]):
 			hearths[cell]["cook"].release_hearth()
 	for cell in furniture.keys():
-		if furniture[cell] != "table":
+		if not furniture[cell] in ["table", "chair"]:
 			furniture.erase(cell)
 			_remove_prop(cell)
 	hearths.clear()
@@ -784,11 +848,16 @@ func set_kitchen(data) -> bool:
 
 # The furniture as plain data for the save file: [[column, row, type], ...]
 # (JSON can't store a Vector2i, but it can store a list of numbers.)
+# Tables are saved once, at their anchor, with the way they run:
+# [column, row, "table" or "long_table", "x" or "y"].
 func get_layout() -> Array:
 	var layout: Array = []
 	for cell in furniture:
-		if furniture[cell] != "expo":   # the pass comes with the kitchen
+		if furniture[cell] in ["kitchen"]:   # the pass comes with the kitchen
 			layout.append([cell.x, cell.y, furniture[cell]])
+	for anchor in tables:
+		var table: Dictionary = tables[anchor]
+		layout.append([anchor.x, anchor.y, table["kind"], "x" if table["dir"] == Vector2i(1, 0) else "y"])
 	return layout
 
 
@@ -799,31 +868,47 @@ func load_layout(layout: Array, kitchen = null) -> void:
 	for cell in _props.keys():
 		_remove_prop(cell)
 	furniture.clear()
+	tables.clear()
+	_table_of.clear()
 	table_owner.clear()
 	hearths.clear()
 	expo_plates.clear()
 	_apply_size()
 	var saved_hearths: Array[Vector2i] = []
-	var tables: Dictionary = {}
+	var old_tables: Dictionary = {}   # tables from saves before chairs: one square each
+	var new_tables: Array = []        # [kind, anchor, dir]
 	for entry in layout:
 		# Skip anything that doesn't make sense rather than crash.
-		if typeof(entry) != TYPE_ARRAY or entry.size() != 3:
+		if typeof(entry) != TYPE_ARRAY or entry.size() < 3:
 			continue
 		var cell := Vector2i(int(entry[0]), int(entry[1]))
 		if not _in_bounds(cell) or cell == door_cell:
 			continue
 		if entry[2] == "kitchen":
 			saved_hearths.append(cell)
+		elif entry[2] in ["table", "long_table"] and entry.size() >= 4:
+			new_tables.append([entry[2], cell, Vector2i(1, 0) if entry[3] == "x" else Vector2i(0, 1)])
 		elif entry[2] == "table":
-			tables[cell] = true
+			old_tables[cell] = true
 
 	var known: bool = set_kitchen(kitchen) if kitchen != null else false
 	if not known:
-		_place_kitchen_for_old_save(saved_hearths.size(), tables)
-	for cell in tables:
-		if not in_kitchen(cell) and cell != expo_front():
-			_place(cell, "table")
+		_place_kitchen_for_old_save(saved_hearths.size(), old_tables)
 	_place(expo_cell(), "expo")
+	for t in new_tables:
+		if _table_fits(t[0], t[1], t[2]):
+			_place_table(t[0], t[1], t[2])
+	# Saves from before chairs: each old one-square table becomes a table
+	# with chairs, running whichever way fits; if neither does, it's sold.
+	for cell in old_tables:
+		var placed: bool = false
+		for dir in [Vector2i(1, 0), Vector2i(0, 1)]:
+			if _table_fits("table", cell, dir) and _layout_works_with_table("table", cell, dir):
+				_place_table("table", cell, dir)
+				placed = true
+				break
+		if not placed:
+			GameManager.refund(floori(GameManager.FURNITURE["table"]["cost"] / 2.0))
 
 	# Hearths that were on the kitchen's line stay put; any others (old
 	# saves had them anywhere) move onto free spots on the line. Ones
@@ -881,11 +966,11 @@ func _try_build(cell: Vector2i) -> void:
 	if build_type == "kitchen_move":
 		_try_move_kitchen(cell)
 		return
+	if build_type in ["table", "long_table"]:
+		_try_build_table(cell)
+		return
 	if furniture.has(cell):
 		build_message.emit("That square is taken.")
-		return
-	if build_type == "table" and in_kitchen(cell):
-		build_message.emit("Tables can't go in the kitchen.")
 		return
 	if build_type == "kitchen" and not on_line(cell):
 		build_message.emit("Hearths go on the kitchen's front row.")
@@ -911,12 +996,104 @@ func _try_build(cell: Vector2i) -> void:
 	build_message.emit("Built a %s." % info["name"])
 
 
+# A table centred on the tapped square (a long table's second row goes
+# beside it), running the way build_dir says.
+func _try_build_table(anchor: Vector2i) -> void:
+	var problem: String = _table_problem(build_type, anchor, build_dir)
+	if problem != "":
+		build_message.emit(problem)
+		return
+	if not _layout_works_with_table(build_type, anchor, build_dir):
+		build_message.emit("That would block someone's way!")
+		return
+	var info: Dictionary = GameManager.FURNITURE[build_type]
+	if not GameManager.try_spend(info["cost"]):
+		build_message.emit("Not enough gold!")
+		return
+	_place_table(build_type, anchor, build_dir)
+	layout_changed.emit()
+	build_message.emit("Built a %s." % info["name"])
+
+
+# Why a table can't go there, or "" if every square it needs is free.
+func _table_problem(kind: String, anchor: Vector2i, dir: Vector2i) -> String:
+	var foot: Dictionary = table_footprint(kind, anchor, dir)
+	var in_use: Dictionary = _cells_in_use(null)
+	for cell in foot["tops"] + foot["chairs"]:
+		if not _in_bounds(cell):
+			return "Not enough room for the %s there." % GameManager.FURNITURE[kind]["name"]
+		if furniture.has(cell):
+			return "Something's in the way."
+		if in_kitchen(cell):
+			return "Tables can't go in the kitchen."
+		if cell == expo_front():
+			return "Keep the spot in front of the pass clear for waiters."
+		if cell == door_cell:
+			return "Keep the doorway clear!"
+		if in_use.has(cell):
+			return "Someone's in the way!"
+	return ""
+
+
+func _table_fits(kind: String, anchor: Vector2i, dir: Vector2i) -> bool:
+	return _table_problem(kind, anchor, dir) == ""
+
+
+# Would the tavern still work with this table added?
+func _layout_works_with_table(kind: String, anchor: Vector2i, dir: Vector2i) -> bool:
+	var solid: Dictionary = furniture.duplicate()
+	var foot: Dictionary = table_footprint(kind, anchor, dir)
+	for cell in foot["tops"]:
+		solid[cell] = "table"
+	for cell in foot["chairs"]:
+		solid[cell] = "chair"
+	return _layout_works(solid, door_cell, kitchen_pos, kitchen_width)
+
+
+func _place_table(kind: String, anchor: Vector2i, dir: Vector2i) -> void:
+	var foot: Dictionary = table_footprint(kind, anchor, dir)
+	tables[anchor] = {"kind": kind, "dir": dir, "tops": foot["tops"], "chairs": foot["chairs"]}
+	table_owner[anchor] = null
+	for cell in foot["tops"]:
+		furniture[cell] = "table"
+		_table_of[cell] = anchor
+		_set_solid(cell, true)
+	# One prop draws the whole tabletop, standing at its middle for y-sorting.
+	var middle := Vector2.ZERO
+	for cell in foot["tops"]:
+		middle += cell_center(cell)
+	_props[anchor] = _new_prop(kind, anchor, middle / foot["tops"].size())
+	for chair in foot["chairs"]:
+		furniture[chair] = "chair"
+		_table_of[chair] = anchor
+		_set_solid(chair, true)
+		var prop: FloorProp = _new_prop("chair", chair, cell_center(chair))
+		prop.facing = top_for_chair(chair) - chair   # towards the table
+		# A chair whose backrest is towards us goes in front of whoever sits
+		# on it (it draws a little higher to make up for it), others behind.
+		var lift: float = 2.0 if prop.facing.x + prop.facing.y < 0 else -2.0
+		prop.position.y += lift
+		prop.lift = lift
+		_props[chair] = prop
+
+
+func _remove_table(anchor: Vector2i) -> void:
+	var table: Dictionary = tables[anchor]
+	for cell in table["tops"] + table["chairs"]:
+		furniture.erase(cell)
+		_table_of.erase(cell)
+		_remove_prop(cell)
+		_set_solid(cell, false)
+	tables.erase(anchor)
+	table_owner.erase(anchor)
+	table_dishes.erase(anchor)
+	_bussers.erase(anchor)
+
+
 func _place(cell: Vector2i, type: String) -> void:
 	furniture[cell] = type
 	_set_solid(cell, true)   # nobody can walk through it now
-	if type == "table":
-		table_owner[cell] = null
-	elif type == "kitchen":
+	if type == "kitchen":
 		hearths[cell] = {"cook": null, "job": {}}
 	# Its FloorProp stands at the square's middle, for y-sorting.
 	_props[cell] = _new_prop(type, cell, cell_center(cell))
@@ -969,8 +1146,17 @@ func _try_remove(cell: Vector2i) -> void:
 	if type == "expo":
 		build_message.emit("The pass is part of the kitchen. Use Kitchen to move it.")
 		return
-	if type == "table" and table_owner[cell] != null:
-		build_message.emit("Someone's sitting there!")
+	if type in ["table", "chair"]:
+		var anchor: Vector2i = _table_of[cell]
+		if table_owner[anchor] != null:
+			build_message.emit("Someone's sitting there!")
+			return
+		var kind: String = tables[anchor]["kind"]
+		var back: int = floori(GameManager.FURNITURE[kind]["cost"] / 2.0)
+		GameManager.refund(back)
+		_remove_table(anchor)
+		layout_changed.emit()
+		build_message.emit("Sold for %dg." % back)
 		return
 	if type == "kitchen":
 		var h: Dictionary = hearths[cell]
@@ -985,9 +1171,6 @@ func _try_remove(cell: Vector2i) -> void:
 	var refund: int = floori(GameManager.FURNITURE[type]["cost"] / 2.0)
 	GameManager.refund(refund)
 	furniture.erase(cell)
-	table_owner.erase(cell)
-	table_dishes.erase(cell)
-	_bussers.erase(cell)
 	hearths.erase(cell)
 	_remove_prop(cell)
 	_set_solid(cell, false)
@@ -1032,7 +1215,8 @@ func _try_move_door(cell: Vector2i) -> void:
 	build_message.emit("Moved the door.")
 
 
-# Would the tavern still work with furniture on new_cell?
+# Would the tavern still work with furniture on new_cell? (Tables use
+# _layout_works_with_table.)
 func _layout_works_with(new_cell: Vector2i) -> bool:
 	# Pretend the new piece is already there.
 	var solid: Dictionary = furniture.duplicate()
@@ -1069,7 +1253,8 @@ func _layout_works(solid: Dictionary, door: Vector2i, k_pos: Vector2i, k_width: 
 			return false
 
 	for person_cell in _cells_in_use(null, count_staff):
-		if not reachable.has(person_cell):
+		# Guests sitting on a chair are fine: they'll step off it.
+		if not reachable.has(person_cell) and solid.get(person_cell, "") != "chair":
 			return false
 
 	for piece in solid:
@@ -1248,8 +1433,11 @@ func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, d
 func draw_prop(prop: FloorProp) -> void:
 	if prop.kind == "kitchen" and not hearths.has(prop.cell):
 		return   # just removed; it disappears at the end of the frame
+	if prop.kind in ["table", "long_table"] and not tables.has(prop.cell):
+		return
 	match prop.kind:
-		"table": _draw_table(prop)
+		"table", "long_table": _draw_table(prop)
+		"chair": _draw_chair(prop)
 		"kitchen": _draw_hearth(prop)
 		"expo": _draw_expo(prop)
 		"wall": _draw_front_wall(prop)
@@ -1261,30 +1449,58 @@ func draw_prop(prop: FloorProp) -> void:
 const TABLE_ART: Texture2D = preload("res://assets/sprites/furniture/table.png")
 const HEARTH_ART: Texture2D = preload("res://assets/sprites/furniture/hearth.png")
 const PASS_ART: Texture2D = preload("res://assets/sprites/furniture/pass.png")
+# The long table is drawn over 2 squares on a taller frame (64 x 80,
+# middle at (32, 62)). Chairs: "back" has its backrest away from us,
+# "front" towards us.
+const LONG_TABLE_ART: Texture2D = preload("res://assets/sprites/furniture/long_table.png")
+const CHAIR_BACK_ART: Texture2D = preload("res://assets/sprites/furniture/chair_back.png")
+const CHAIR_FRONT_ART: Texture2D = preload("res://assets/sprites/furniture/chair_front.png")
 const ART_FRAME := Vector2(64, 72)
 const ART_ANCHOR := Vector2(32, 58)
+const LONG_FRAME := Vector2(64, 80)
+const LONG_ANCHOR := Vector2(32, 62)
 const ART_SCALE: float = 2.0
 
 
-func _draw_art(prop: FloorProp, art: Texture2D, frame: int = 0) -> void:
-	var source := Rect2(Vector2(ART_FRAME.x * frame, 0), ART_FRAME)
-	prop.draw_texture_rect_region(art, Rect2(-ART_ANCHOR * ART_SCALE, ART_FRAME * ART_SCALE), source)
+# mirror = true flips it left to right, which in this view turns
+# something running along x into the same thing running along y.
+func _draw_art(prop: FloorProp, art: Texture2D, frame: int = 0, mirror: bool = false,
+		size: Vector2 = ART_FRAME, anchor: Vector2 = ART_ANCHOR) -> void:
+	var source := Rect2(Vector2(size.x * frame, 0), size)
+	prop.draw_set_transform(Vector2(0, -prop.lift), 0.0, Vector2(-1, 1) if mirror else Vector2.ONE)
+	prop.draw_texture_rect_region(art, Rect2(-anchor * ART_SCALE, size * ART_SCALE), source)
+	prop.draw_set_transform(Vector2.ZERO)
 
 
 const TABLE_TOP: float = 26.0   # how high the tabletop is, in world pixels
-# Where plates go on the tabletop (up to 3: adventurers share a table).
-const PLATE_SPOTS: Array = [Vector2(-10, -2), Vector2(10, -2), Vector2(0, 5)]
 
 
 func _draw_table(prop: FloorProp) -> void:
-	_draw_art(prop, TABLE_ART)
-	# The table stays bare until food arrives. Dirty plates stay until a
-	# Waiter clears them.
+	var table: Dictionary = tables[prop.cell]
+	var along_y: bool = table["dir"] == Vector2i(0, 1)
+	if table["kind"] == "long_table":
+		_draw_art(prop, LONG_TABLE_ART, 0, along_y, LONG_FRAME, LONG_ANCHOR)
+	else:
+		_draw_art(prop, TABLE_ART, 0, along_y)
+	# The table stays bare until food arrives: each plate sits in front of
+	# a chair. Dirty plates stay until a Waiter clears them.
 	var dishes: Dictionary = table_dishes.get(prop.cell, {})
 	var full: int = dishes.get("full", 0)
 	var dirty: int = dishes.get("dirty", 0)
-	for i in mini(full + dirty, PLATE_SPOTS.size()):
-		draw_plate(prop, Vector2(0, -TABLE_TOP) + PLATE_SPOTS[i], i < full)
+	var chairs: Array = table["chairs"]
+	for i in mini(full + dirty, chairs.size()):
+		var top: Vector2 = cell_center(table["tops"][i / 2])
+		var toward_chair: Vector2 = (cell_center(chairs[i]) - top) * 0.3
+		draw_plate(prop, top - prop.position + toward_chair + Vector2(0, -TABLE_TOP), i < full)
+
+
+func _draw_chair(prop: FloorProp) -> void:
+	if not furniture.has(prop.cell):
+		return
+	# Facing +x or +y, the backrest is away from us; facing -x or -y it's
+	# towards us. Facing along y is the x picture mirrored.
+	var art: Texture2D = CHAIR_BACK_ART if prop.facing.x + prop.facing.y > 0 else CHAIR_FRONT_ART
+	_draw_art(prop, art, 0, prop.facing.y != 0)
 
 
 # A plate seen from above at the isometric angle (squashed to half height).

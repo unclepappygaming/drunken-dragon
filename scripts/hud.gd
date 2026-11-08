@@ -21,7 +21,7 @@
 class_name TavernHUD
 extends CanvasLayer
 
-signal build_selected(type: String)     # "table", "kitchen", "remove" or ""
+signal build_selected(type: String)     # "table", "long_table", "kitchen", "remove", ... or ""
 signal day_start_requested(banquet: bool)
 signal hire_requested(role: String, index: int)   # index into GameManager.applicants(role)
 signal fire_requested(uid: int)
@@ -63,6 +63,7 @@ var _new_game_button: Button
 var _new_game_armed: bool = false   # true after the first tap
 var _move_armed: bool = false       # the same for moving to the Grand Hall
 var _gold_taps: Array[int] = []     # times of recent taps on the gold (msec)
+var _rotate_button: Button
 var _recipe_panel: PanelContainer
 var _recipe_header: Label
 var _recipe_list: VBoxContainer
@@ -256,11 +257,24 @@ func _select_tool(type: String) -> void:
 	for tool in _tool_buttons:
 		_tool_buttons[tool].modulate = HIGHLIGHT if tool == type else Color.WHITE
 	match type:
-		"table":   _set_hint("Tap a square: Table (50g)")
-		"kitchen": _set_hint("Tap the kitchen's front row: Hearth (120g)")
+		"table", "long_table":
+			var info: Dictionary = GameManager.FURNITURE[type]
+			_set_hint("Tap the middle square: %s, %d seats (%dg)" % [
+				info["name"], TavernGrid.seats_at(type), info["cost"]])
+		"kitchen": _set_hint("Tap the kitchen's front row: Hearth (%dg)" % GameManager.FURNITURE["kitchen"]["cost"])
 		"kitchen_move": _set_hint("Tap where the kitchen's back-left corner should go")
 		"remove":  _set_hint("Tap furniture to sell it (half price)")
 		"door":    _set_hint("Tap a square along a wall to move the door (%dg)" % TavernGrid.DOOR_COST)
+
+
+# Turns new tables the other way.
+func _on_rotate() -> void:
+	if grid == null:
+		return
+	grid.build_dir = Vector2i(grid.build_dir.y, grid.build_dir.x)
+	_rotate_button.text = "Rotate\n\\" if grid.build_dir == Vector2i(1, 0) else "Rotate\n/"
+	if not grid.build_type in ["table", "long_table"]:
+		_select_tool("table")
 
 
 func _set_hint(text: String) -> void:
@@ -450,20 +464,32 @@ func _build_trays() -> void:
 	# Build tray. [button text, build type]
 	var build_panel := PanelContainer.new()
 	add_child(build_panel)
-	_pin_bottom(build_panel, BAR_HEIGHT, TRAY_HEIGHT)
+	# Two rows of buttons, so it's twice as tall as the Staff tray.
+	_pin_bottom(build_panel, BAR_HEIGHT, TRAY_HEIGHT * 2)
 	_solid(build_panel, Color(0.2, 0.16, 0.12))
 	_build_tray = build_panel
-	var build_row := HBoxContainer.new()
+	var build_row := GridContainer.new()
+	build_row.columns = 5
 	build_panel.add_child(build_row)
-	var tools: Array = [["Table\n50g", "table"], ["Hearth\n120g", "kitchen"], ["Sell", "remove"],
+	var cost := func(type: String) -> String: return "%dg" % GameManager.FURNITURE[type]["cost"]
+	var tools: Array = [["Table\n" + cost.call("table"), "table"], ["Long Table\n" + cost.call("long_table"), "long_table"],
+			["Hearth\n" + cost.call("kitchen"), "kitchen"], ["Sell", "remove"],
 			["Door\n%dg" % TavernGrid.DOOR_COST, "door"], ["Move\nKitchen", "kitchen_move"]]
 	for entry in tools:
 		var button := _make_button(entry[0], 21, build_row, 86)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.pressed.connect(_select_tool.bind(entry[1]))
 		_tool_buttons[entry[1]] = button
+	# Which way new tables run: "\\" runs down-right, "/" down-left.
+	_rotate_button = _make_button("Rotate\n\\", 21, build_row, 86)
+	_rotate_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rotate_button.pressed.connect(_on_rotate)
+	build_row.move_child(_rotate_button, 2)
 	var expand := _make_button("Expand", 21, build_row, 86)
+	expand.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	expand.pressed.connect(_on_expand_tool)
 	var done := _make_button("Done", 21, build_row, 86)
+	done.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	done.pressed.connect(_set_tray.bind(""))
 
 	# Staff tray: see today's applicants, or everyone you've hired.

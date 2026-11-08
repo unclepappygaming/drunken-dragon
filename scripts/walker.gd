@@ -184,7 +184,13 @@ func is_moving() -> bool:
 # Draws the current frame of sprite_sheet. Call it from _draw().
 # Sheet columns: front x3, side x3 (facing right), back x3; each set is
 # [standing, walk 1, walk 2]. Row 1 is the same poses carrying a dish.
-func draw_sprite(carrying: bool = false) -> void:
+# How a seated guest is drawn: the frame cut off at the hips (the chair
+# hides the legs), raised so the hips rest on the seat.
+const SEATED_ROWS: float = 32.0   # frame rows kept (of 40): everything above the legs
+const SEATED_RISE: float = 16.0   # world pixels up, onto the chair seat
+
+
+func draw_sprite(carrying: bool = false, seated: bool = false) -> void:
 	if sprite_sheet == null:
 		return
 	var frame: Vector2 = Vector2(StaffProfiles.FRAME_SIZE)
@@ -196,6 +202,10 @@ func draw_sprite(carrying: bool = false) -> void:
 	# The feet are near the bottom of the frame; stand them a little
 	# below our position, so we look like we're standing in our square.
 	var spot := Rect2(Vector2(-size.x / 2.0, 18.0 - size.y), size)
+	if seated:
+		source.size.y = SEATED_ROWS
+		spot.size.y = SEATED_ROWS * SPRITE_SCALE
+		spot.position.y -= SEATED_RISE
 	if _facing == "left":
 		# The sheet only faces right; mirror it to face left.
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2(-1, 1))

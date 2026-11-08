@@ -168,6 +168,52 @@ def table_trestle():
     return p.finish()
 
 
+LONG_CANVAS = (64, 80, (32, 62))   # the long table's frame: taller, same width
+
+
+def long_table():
+    """The 4-seat table: the trestle table stretched over 2 squares (along
+    y, from -24 to 24 around its middle). Drawn on a 64 x 80 frame with
+    its middle at (32, 62)."""
+    global FW, FH, ANCHOR
+    saved = (FW, FH, ANCHOR)
+    FW, FH, ANCHOR = LONG_CANVAS
+    try:
+        p = Piece()
+        p.shadow(9)
+        p.ellipse_flat(0, -12, 0, 9, SHADOW)
+        p.ellipse_flat(0, 12, 0, 9, SHADOW)
+        for y in (-14, 14):     # a trestle under each half
+            for x in (-6, 6):
+                p.line(P(x, y - 5, 0), P(x, y + 5, 10), OAK_DARK)
+                p.line(P(x, y + 5, 0), P(x, y - 5, 10), OAK_DARK)
+                p.line(P(x + 1, y - 5, 0), P(x + 1, y + 5, 10), shade(OAK_DARK, 0.8))
+                p.line(P(x + 1, y + 5, 0), P(x + 1, y - 5, 10), shade(OAK_DARK, 0.8))
+        p.box(-1, -16, 4, 1, 16, 5, OAK_DARK, edge=False)       # long stretcher
+        p.box(-9, -20, 10, 9, 20, 13, PINE)
+        for x in (-3, 3):   # planks run the long way
+            p.line(P(x, -20, 13), P(x, 20, 13), shade(PINE, 0.8))
+        return p.finish()
+    finally:
+        FW, FH, ANCHOR = saved
+
+
+def chair(back):
+    """A wooden chair at the end of a table. back = +1: its backrest is on
+    the +x side (towards the bottom right of the screen); -1: the -x side.
+    Facing the other way (along y) is the same picture mirrored."""
+    p = Piece()
+    p.shadow(6)
+    for x in (-4, 4):          # legs
+        for y in (-4, 4):
+            p.line(P(x, y, 0), P(x, y, 7), OAK_DARK)
+    p.box(-5, -5, 7, 5, 5, 9, OAK)                         # seat
+    bx = 5 * back
+    p.box(bx - 1, -5, 9, bx + 1, 5, 20, OAK, shade(OAK, 0.85), shade(OAK, 0.7))   # backrest
+    p.box(bx - 1.5, -5.5, 19, bx + 1.5, 5.5, 21, shade(OAK, 1.1), edge=False)    # top rail
+    return p.finish()
+
+
 def table_barrel():
     """An ale barrel standing on end, used as a table."""
     p = Piece()
@@ -395,6 +441,9 @@ if __name__ == "__main__":
     out = os.path.join(root, "assets", "sprites", "furniture")
     os.makedirs(out, exist_ok=True)
     table_trestle().save(os.path.join(out, "table.png"))
+    long_table().save(os.path.join(out, "long_table.png"))
+    chair(-1).save(os.path.join(out, "chair_back.png"))     # backrest away from the viewer
+    chair(1).save(os.path.join(out, "chair_front.png"))     # backrest towards the viewer
     # Hearth sheet: frame 0 is the idle glow, frames 1-3 the cooking fire.
     hearth = Image.new("RGBA", (FW * 4, FH), (0, 0, 0, 0))
     hearth.paste(hearth_stove(0, lit=False), (0, 0))

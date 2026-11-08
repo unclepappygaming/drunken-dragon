@@ -41,14 +41,18 @@ const SAVE_PATH: String = "user://save.json"
 # Version 2 added recipes and the menu, version 3 lifetime stats (for
 # quests), version 4 expansions and the door, version 5 fame milestones,
 # version 6 named staff with types and looks, version 7 the kitchen zone,
-# version 8 the location (the tavern or the Grand Hall).
+# version 8 the location (the tavern or the Grand Hall), version 9 tables
+# with chairs (older one-square tables become 3 x 1 tables on loading).
 # Older saves still load.
-const SAVE_VERSION: int = 8
+const SAVE_VERSION: int = 9
 
 # Everything the player can build. The key ("table") is the ID the
 # other scripts use; the inner Dictionary holds its details.
 const FURNITURE: Dictionary = {
+	# A Table is 3 x 1 (chair, table, chair) and seats 2; a Long Table is
+	# 3 x 2 and seats 4. Each group of guests takes a whole table.
 	"table": {"name": "Table", "cost": 100, "color": Color(0.55, 0.36, 0.2)},
+	"long_table": {"name": "Long Table", "cost": 220, "color": Color(0.55, 0.36, 0.2)},
 	"kitchen": {"name": "Hearth", "cost": 250, "color": Color(0.7, 0.25, 0.15)},
 }
 
@@ -755,15 +759,15 @@ func busyness() -> float:
 	return 1.0
 
 
-# More fame = guests arrive more often (6 seconds at 0 fame, down to 2
-# at 100), and more often still during rushes. Turning guests away spoils
+# More fame = guests arrive more often (6.5 seconds at 0 fame, down to
+# 2.5 at 100), and more often still during rushes. Turning guests away spoils
 # the daily review, so build more Tables and hire more staff as fame grows.
 # In the Grand Hall the crowds grow with the hall instead: every
 # expansion brings guests faster, down to about one a second.
 func get_spawn_interval() -> float:
 	if in_hall():
 		return max(1.0, 2.6 - 0.35 * expansions_built) / busyness()
-	return max(2.0, 6.0 - fame * 0.04) / busyness()
+	return max(2.5, 6.5 - fame * 0.04) / busyness()
 
 
 # ---------------------------------------------------------------------

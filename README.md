@@ -11,8 +11,14 @@ invite nobles to a banquet, but they only eat the fancy dishes.
 Each day runs from 09:00 to 21:00 (about two real minutes). Drag with one
 finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 
-- **Guests** come in, sit beside a free Table and call for a waiter. If no
-  table is free, they wait in a **line outside the door** (up to 5) and take
+- **Tables** are three squares in a row: a chair, the table, a chair (2
+  seats, 100g). A **Long Table** is two of those side by side (4 seats,
+  220g). **Rotate** in the Build tray turns new tables the other way.
+  Guests sit on the chairs, and each group (one guest, a pair or a party)
+  gets a whole table, so match your tables to your crowd: parties of 3
+  need a Long Table.
+- **Guests** come in, sit at a free table that fits their group and call
+  for a waiter. If no table is free, they wait in a **line outside the door** (up to 5) and take
   the next table that frees up. If they wait too long, or the line is full,
   they leave and you lose fame.
 - **Guests come in different types**, each with their own look and habits:
@@ -67,7 +73,8 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 
 The bottom bar has four buttons:
 
-- **Build** opens a tray: Table, Hearth, Sell, Door and Expand. You can't
+- **Build** opens a tray: Table, Long Table, Rotate, Hearth, Sell, Door,
+  Move Kitchen and Expand. You can't
   block the doorway or wall anyone in.
   - **Door** moves the front door to any square along a wall (100g, between
     days). The waiting line follows it.
@@ -75,8 +82,8 @@ The bottom bar has four buttons:
     days: tap where its back-left corner should go.
   - **Expand** makes the floor bigger, up to 12 x 14. Each expansion is
     unlocked by a quest (like "Serve 60 guests"), then bought with gold.
-    The same card has **Widen Kitchen** (250g a square, up to 8 wide). Tables cost 100g and
-    Hearths 250g; selling gives half back.
+    The same card has **Widen Kitchen** (250g a square, up to 8 wide).
+    Hearths cost 250g; selling anything gives half back.
 - **Staff** opens a tray: **Hire Cook**, **Hire Waiter** (three new
   applicants each day) and **Your Staff** (let someone go). Between days
   only. Hiring costs a signing fee of 4 days' wages up front, then wages
@@ -168,8 +175,9 @@ The floor and walls are drawn in code; characters and furniture are pixel-art sp
      guest, with ranks from Unknown to Legendary
    - ✅ Ingredient costs, cheaper dishes, a hiring fee, pricier furniture,
      expansions and wages, tested with a bot over 50-day games: a good
-     player reaches Local Haunt around day 7, Town Favorite day 11, Talk of
-     the Realm day 18, Famed Hall day 26 and Legendary around day 43
+     player reaches Local Haunt around day 6-11, Town Favorite day 12-16,
+     Talk of the Realm day 18-22, Famed Hall day 26-33 and Legendary around
+     day 44-52 (with 3 x 1 tables and chairs)
    - ✅ The Grand Hall gives late-game gold a goal (a bot reaches it around
      day 47 and fills it out over the next ~40 days)
 5. ✅ **Bigger tavern**
