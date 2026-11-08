@@ -272,17 +272,19 @@ func _select_tool(type: String) -> void:
 			if piece["where"] == "wall":
 				_set_hint("Tap a stretch of back wall: %s" % piece["name"])
 			else:
-				_set_hint("Tap a square: %s (%dg)" % [piece["name"], piece["cost"]])
+				_set_hint("Tap a square: %s (%dg). Rotate turns it." % [piece["name"], piece["cost"]])
 		"door":    _set_hint("Tap a square along a wall to move the door (%dg)" % TavernGrid.DOOR_COST)
 
 
-# Turns new tables the other way.
+# Turns new tables and floor decorations the other way.
 func _on_rotate() -> void:
 	if grid == null:
 		return
 	grid.build_dir = Vector2i(grid.build_dir.y, grid.build_dir.x)
 	_rotate_button.text = "Rotate\n\\" if grid.build_dir == Vector2i(1, 0) else "Rotate\n/"
-	if not grid.build_type in ["table", "long_table"]:
+	if grid.build_type == "decor" and GameManager.DECOR[grid.decor_choice]["where"] == "floor":
+		_select_tool("decor")   # refreshes the hint
+	elif not grid.build_type in ["table", "long_table"]:
 		_select_tool("table")
 
 

@@ -89,7 +89,8 @@ The bottom bar has four buttons:
       Ale Barrels 90g, Rug 120g (people walk over it), Suit of Armour 250g,
       Bookshelf 250g, Fireplace 400g (its fire flickers) and the Dragon
       Statue 1500g, which covers 2 x 2 squares and needs Legendary rank.
-      Sell gives half back.
+      **Rotate** turns them before placing (a bookshelf or fireplace can
+      stand against either back wall). Sell gives half back.
     - **Wall trophies** are earned by achievements, never bought, and hang
       on a stretch of back wall (not over windows, banners or the door).
       Tap a hung piece with Sell to take it down; "Move" re-hangs it.

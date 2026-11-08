@@ -101,7 +101,8 @@ var furniture: Dictionary = {}
 var tables: Dictionary = {}
 var _table_of: Dictionary = {}   # every tabletop and chair square -> its table's anchor
 # DECORATIONS, just for looks. A floor piece is known by its first square:
-#   decor[anchor] = {"id": ..., "cells": [every square it covers]}
+#   decor[anchor] = {"id": ..., "cells": [every square it covers],
+#                    "flip": true if turned the other way (Rotate)}
 # Solid pieces are also "decor" in `furniture`; a rug isn't (people walk
 # over it), but nothing can be built on it. Wall pieces hang on the back
 # walls: wall_decor["top:3"] or ["left:5"] = id (one piece per stretch).
@@ -1262,14 +1263,15 @@ func _try_place_decor(anchor: Vector2i) -> void:
 	if not GameManager.try_spend(info["cost"]):
 		build_message.emit("Not enough gold!")
 		return
-	_place_decor(id, anchor)
+	# Rotate turns decorations too: the second direction mirrors the piece.
+	_place_decor(id, anchor, build_dir == Vector2i(0, 1))
 	layout_changed.emit()
 	build_message.emit("Placed the %s." % info["name"])
 
 
-func _place_decor(id: String, anchor: Vector2i) -> void:
+func _place_decor(id: String, anchor: Vector2i, flip: bool = false) -> void:
 	var cells: Array[Vector2i] = _decor_cells(id, anchor)
-	decor[anchor] = {"id": id, "cells": cells}
+	decor[anchor] = {"id": id, "cells": cells, "flip": flip}
 	var middle := Vector2.ZERO
 	for cell in cells:
 		_decor_of[cell] = anchor
@@ -1353,7 +1355,7 @@ func is_hung(id: String) -> bool:
 func get_decor() -> Dictionary:
 	var floor_pieces: Array = []
 	for anchor in decor:
-		floor_pieces.append([anchor.x, anchor.y, decor[anchor]["id"]])
+		floor_pieces.append([anchor.x, anchor.y, decor[anchor]["id"], 1 if decor[anchor]["flip"] else 0])
 	var wall_pieces: Array = []
 	for wall in wall_decor:
 		var parts: PackedStringArray = wall.split(":")
@@ -1367,7 +1369,7 @@ func load_decor(data) -> void:
 	if typeof(data) != TYPE_DICTIONARY:
 		return
 	for entry in data.get("floor", []):
-		if typeof(entry) != TYPE_ARRAY or entry.size() != 3 or not GameManager.DECOR.has(entry[2]):
+		if typeof(entry) != TYPE_ARRAY or entry.size() < 3 or not GameManager.DECOR.has(entry[2]):
 			continue
 		var anchor := Vector2i(int(entry[0]), int(entry[1]))
 		var fits: bool = true
@@ -1375,7 +1377,7 @@ func load_decor(data) -> void:
 			if not _in_bounds(cell) or _blocked(cell) or in_kitchen(cell) or cell == door_cell or cell == expo_front():
 				fits = false
 		if fits:
-			_place_decor(entry[2], anchor)
+			_place_decor(entry[2], anchor, entry.size() > 3 and int(entry[3]) == 1)
 	for entry in data.get("wall", []):
 		if typeof(entry) != TYPE_ARRAY or entry.size() != 3 or not GameManager.DECOR.has(entry[2]):
 			continue
@@ -1572,7 +1574,7 @@ func _draw() -> void:
 	# Rugs lie on the floor, under everyone.
 	for anchor in decor:
 		if GameManager.DECOR[decor[anchor]["id"]].get("walk", false):
-			_draw_decor_art(self, decor[anchor]["id"], iso(Vector2(anchor) + Vector2(0.5, 0.5)))
+			_draw_decor_art(self, decor[anchor]["id"], iso(Vector2(anchor) + Vector2(0.5, 0.5)), decor[anchor]["flip"])
 
 	# Doormat on the doorway square.
 	var mat: PackedVector2Array = _diamond(door_cell)
@@ -1666,7 +1668,7 @@ func draw_prop(prop: FloorProp) -> void:
 		"chair": _draw_chair(prop)
 		"decor":
 			if decor.has(prop.cell):
-				_draw_decor_art(prop, decor[prop.cell]["id"], Vector2.ZERO)
+				_draw_decor_art(prop, decor[prop.cell]["id"], Vector2.ZERO, decor[prop.cell]["flip"])
 		"kitchen": _draw_hearth(prop)
 		"expo": _draw_expo(prop)
 		"wall": _draw_front_wall(prop)
