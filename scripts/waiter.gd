@@ -34,8 +34,7 @@ const CLEAR_TIME: float = 0.8
 const SMOOTH_TALK_PATIENCE: float = 10.0
 const LUCKY_CHANCE: float = 1.0 / 3.0
 const LUCKY_TIP: float = 0.5
-# Dishes that are carried as a mug instead of a plate.
-const DRINKS: Array[String] = ["ale", "mead", "wine"]
+const TRAY_SIZE: float = 0.75   # dishes on the tray are drawn a bit smaller
 
 var state: State = State.IDLE
 
@@ -196,16 +195,16 @@ func _draw() -> void:
 	draw_sprite(carrying)
 	if not carrying:
 		return
-	# The sheet only has an empty tray; put what we're carrying on it.
+	# The sheet only has an empty tray; put what we're carrying on it: the
+	# guest's own dish (an ale comes in its tankard), or on the way back,
+	# a stack of dirty plates. The dish pictures' plates sit 6 pixels
+	# below their middle, so that's lifted onto the tray.
 	var tray: Vector2 = _tray_spot()
 	if state == State.RETURNING:
-		# Dirty plates, stacked, on the way back to the pass.
-		grid.draw_plate(self, tray + Vector2(0, -2), false, 0.7)
-		grid.draw_plate(self, tray + Vector2(0, -5), false, 0.7)
-	elif is_instance_valid(_guest) and _guest.order.get("id", "") in DRINKS:
-		_draw_mug(tray)
-	else:
-		grid.draw_plate(self, tray + Vector2(0, -3), true, 0.75)
+		grid.draw_dish(self, tray + Vector2(0, -5), "dirty", TRAY_SIZE)
+		grid.draw_dish(self, tray + Vector2(0, -8), "dirty", TRAY_SIZE)
+	elif is_instance_valid(_guest):
+		grid.draw_dish(self, tray + Vector2(0, -5), _guest.order.get("id", "plate"), TRAY_SIZE)
 
 
 # Where the top of the tray is in each pose (it matches the sprite sheet:
@@ -220,12 +219,3 @@ func _tray_spot() -> Vector2:
 	if profile.get("type", "") == "halfling":
 		spot.y += 8
 	return spot
-
-
-# A mug of something, with foam on top, standing on the tray.
-func _draw_mug(tray: Vector2) -> void:
-	var outline := Color8(40, 26, 20)
-	draw_rect(Rect2(tray + Vector2(-6, -15), Vector2(12, 15)), outline)
-	draw_rect(Rect2(tray + Vector2(-5, -14), Vector2(10, 13)), Color8(205, 140, 50))
-	draw_rect(Rect2(tray + Vector2(-5, -14), Vector2(10, 4)), Color8(250, 245, 225))
-	draw_rect(Rect2(tray + Vector2(6, -11), Vector2(3, 7)), outline)   # handle

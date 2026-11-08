@@ -159,6 +159,5 @@ func _dish_wanted() -> bool:
 func _draw() -> void:
 	draw_sprite()
 	if is_instance_valid(_dish):
-		# The plate, held out in front.
-		draw_circle(Vector2(0, -6), 9.0, Color.WHITE)
-		draw_circle(Vector2(0, -6), 5.5, Color8(190, 110, 50))
+		# The dish, held out in front.
+		grid.draw_dish(self, Vector2(0, -8), _dish.order.get("id", "plate"), 0.75)

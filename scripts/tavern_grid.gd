@@ -523,35 +523,43 @@ func release_table(cell: Vector2i) -> void:
 # Plates on tables
 # ---------------------------------------------------------------------
 func _is_clean(cell: Vector2i) -> bool:
-	var dishes: Dictionary = table_dishes.get(cell, {})
-	return dishes.get("full", 0) == 0 and dishes.get("dirty", 0) == 0
+	return table_dishes.get(cell, {}).is_empty()
 
 
-func _change_dishes(cell: Vector2i, full: int, dirty: int) -> void:
-	if not furniture.has(cell):
+# How many plates on a table are finished with (waiting to be cleared).
+func _dirty_count(cell: Vector2i) -> int:
+	var count: int = 0
+	for seat in table_dishes.get(cell, {}):
+		if table_dishes[cell][seat]["done"]:
+			count += 1
+	return count
+
+
+# A Waiter sets a guest's dish down in front of their chair.
+func serve_dish(cell: Vector2i, chair: Vector2i, dish: String) -> void:
+	if not tables.has(cell):
 		return
-	var dishes: Dictionary = table_dishes.get(cell, {"full": 0, "dirty": 0})
-	dishes["full"] = maxi(dishes["full"] + full, 0)
-	dishes["dirty"] = maxi(dishes["dirty"] + dirty, 0)
-	table_dishes[cell] = dishes
+	var plates: Dictionary = table_dishes.get(cell, {})
+	plates[maxi(tables[cell]["chairs"].find(chair), 0)] = {"dish": dish, "done": false}
+	table_dishes[cell] = plates
 	_props[cell].queue_redraw()
 
 
-# A Waiter sets a guest's food down.
-func serve_dish(cell: Vector2i) -> void:
-	_change_dishes(cell, 1, 0)
-
-
-# The guest finished eating: the full plate becomes a dirty one.
-func finish_dish(cell: Vector2i) -> void:
-	_change_dishes(cell, -1, 1)
+# The guest finished: their plate (or mug) is left empty.
+func finish_dish(cell: Vector2i, chair: Vector2i) -> void:
+	if not tables.has(cell) or not table_dishes.has(cell):
+		return
+	var seat: int = maxi(tables[cell]["chairs"].find(chair), 0)
+	if table_dishes[cell].has(seat):
+		table_dishes[cell][seat]["done"] = true
+	_props[cell].queue_redraw()
 
 
 # A Waiter looks for a table everyone has left that still has dirty
 # plates and nobody else is coming to clear. Returns NO_CELL if none.
 func claim_dirty_table(waiter: Waiter) -> Vector2i:
 	for cell in table_dishes:
-		if table_dishes[cell]["dirty"] > 0 and table_owner.get(cell) == null \
+		if _dirty_count(cell) > 0 and table_owner.get(cell) == null \
 				and not is_instance_valid(_bussers.get(cell)):
 			_bussers[cell] = waiter
 			return cell
@@ -565,8 +573,13 @@ func clear_table(cell: Vector2i, waiter: Waiter) -> int:
 		_bussers.erase(cell)
 	if not table_dishes.has(cell):
 		return 0
-	var taken: int = table_dishes[cell]["dirty"]
-	table_dishes[cell]["dirty"] = 0
+	var taken: int = 0
+	for seat in table_dishes[cell].keys():
+		if table_dishes[cell][seat]["done"]:
+			table_dishes[cell].erase(seat)
+			taken += 1
+	if table_dishes[cell].is_empty():
+		table_dishes.erase(cell)
 	_props[cell].queue_redraw()
 	if _is_clean(cell):
 		table_freed.emit()
@@ -581,7 +594,7 @@ func release_busser(waiter: Waiter) -> void:
 
 func has_dirty_tables() -> bool:
 	for cell in table_dishes:
-		if table_dishes[cell]["dirty"] > 0:
+		if _dirty_count(cell) > 0:
 			return true
 	return false
 
@@ -1768,16 +1781,17 @@ func _draw_table(prop: FloorProp) -> void:
 		_draw_art(prop, LONG_TABLE_ART, 0, along_y, LONG_FRAME, LONG_ANCHOR)
 	else:
 		_draw_art(prop, TABLE_ART, 0, along_y)
-	# The table stays bare until food arrives: each plate sits in front of
-	# a chair. Dirty plates stay until a Waiter clears them.
-	var dishes: Dictionary = table_dishes.get(prop.cell, {})
-	var full: int = dishes.get("full", 0)
-	var dirty: int = dishes.get("dirty", 0)
+	# The table stays bare until food arrives: each guest's dish sits in
+	# front of their chair. Empty plates stay until a Waiter clears them.
+	var plates: Dictionary = table_dishes.get(prop.cell, {})
 	var chairs: Array = table["chairs"]
-	for i in mini(full + dirty, chairs.size()):
-		var top: Vector2 = cell_center(table["tops"][i / 2])
-		var toward_chair: Vector2 = (cell_center(chairs[i]) - top) * 0.3
-		draw_plate(prop, top - prop.position + toward_chair + Vector2(0, -TABLE_TOP), i < full)
+	for seat in plates:
+		var top: Vector2 = cell_center(table["tops"][seat / 2])
+		var toward_chair: Vector2 = (cell_center(chairs[seat]) - top) * 0.3
+		var dish: String = plates[seat]["dish"]
+		if plates[seat]["done"]:
+			dish = dish + "_empty" if FOOD_ART.has(dish + "_empty") else "dirty"
+		draw_dish(prop, top - prop.position + toward_chair + Vector2(0, -TABLE_TOP), dish)
 
 
 func _draw_chair(prop: FloorProp) -> void:
@@ -1789,23 +1803,34 @@ func _draw_chair(prop: FloorProp) -> void:
 	_draw_art(prop, art, 0, prop.facing.y != 0)
 
 
-# A plate seen from above at the isometric angle (squashed to half height).
-# Also used by waiters for the plates on their tray (smaller `size`).
-func draw_plate(prop: CanvasItem, at: Vector2, with_food: bool, size: float = 1.0) -> void:
-	prop.draw_set_transform(at, 0.0, Vector2(size, size * 0.5))
-	prop.draw_circle(Vector2.ZERO, 12.0, Color8(40, 26, 20))     # outline
-	prop.draw_circle(Vector2.ZERO, 11.0, Color8(245, 242, 232))
-	if with_food:
-		prop.draw_circle(Vector2(0, -1), 7.5, Color8(150, 80, 35))
-		prop.draw_circle(Vector2(-1, -2), 6.0, Color8(195, 112, 50))
-		prop.draw_circle(Vector2(-3, -4), 2.5, Color8(240, 175, 95))
-		prop.draw_circle(Vector2(4, 2), 2.0, Color8(110, 160, 60))   # a bit of green
-	else:
-		# Leftover crumbs and a smear of sauce.
-		prop.draw_circle(Vector2(3, 2), 2.5, Color8(175, 105, 55))
-		prop.draw_circle(Vector2(-4, -3), 1.5, Color8(150, 95, 50))
-		prop.draw_circle(Vector2(-2, 4), 1.5, Color8(190, 120, 60))
-	prop.draw_set_transform(Vector2.ZERO)
+# Dishes (tools/sprites/make_food.py): one 36 x 28 picture each, the
+# middle of the plate at (18, 18). They're drawn at 1x, finer than the
+# 2x furniture, so the food can show some detail. "dirty" is a cleared-
+# off plate; "<drink>_empty" what a finished drink leaves.
+const FOOD_ART: Dictionary = {
+	"ale": preload("res://assets/sprites/food/ale.png"),
+	"stew": preload("res://assets/sprites/food/stew.png"),
+	"mead": preload("res://assets/sprites/food/mead.png"),
+	"boar": preload("res://assets/sprites/food/boar.png"),
+	"cheese": preload("res://assets/sprites/food/cheese.png"),
+	"wings": preload("res://assets/sprites/food/wings.png"),
+	"wine": preload("res://assets/sprites/food/wine.png"),
+	"phoenix": preload("res://assets/sprites/food/phoenix.png"),
+	"feast": preload("res://assets/sprites/food/feast.png"),
+	"plate": preload("res://assets/sprites/food/plate.png"),
+	"dirty": preload("res://assets/sprites/food/dirty.png"),
+	"ale_empty": preload("res://assets/sprites/food/ale_empty.png"),
+	"mead_empty": preload("res://assets/sprites/food/mead_empty.png"),
+	"wine_empty": preload("res://assets/sprites/food/wine_empty.png"),
+}
+const FOOD_MIDDLE := Vector2(18, 18)
+
+
+# Draws a dish with the middle of its plate at `at`. Also used for the
+# pass, the waiters' trays and the cooks' hands (smaller `size`).
+func draw_dish(canvas: CanvasItem, at: Vector2, dish: String, size: float = 1.0) -> void:
+	var art: Texture2D = FOOD_ART.get(dish, FOOD_ART["plate"])
+	canvas.draw_texture_rect(art, Rect2(at - FOOD_MIDDLE * size, art.get_size() * size), false)
 
 
 func _draw_hearth(prop: FloorProp) -> void:
@@ -1831,7 +1856,9 @@ func _draw_hearth(prop: FloorProp) -> void:
 func _draw_expo(prop: FloorProp) -> void:
 	_draw_art(prop, PASS_ART)
 	for i in expo_plates.size():
-		draw_plate(prop, Vector2(-14 + i * 14, -28 + (i % 2) * 5), true)
+		var guest = expo_plates[i]["guest"]
+		var dish: String = guest.order.get("id", "plate") if is_instance_valid(guest) else "plate"
+		draw_dish(prop, Vector2(-16 + i * 16, -28 + (i % 2) * 5), dish)
 
 
 func _draw_front_wall(prop: FloorProp) -> void:

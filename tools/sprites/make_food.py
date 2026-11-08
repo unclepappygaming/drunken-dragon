@@ -2,7 +2,9 @@
 
 Run from the repo root:  python3 tools/sprites/make_food.py
 It writes the game's dish sprites to assets/sprites/food/ (one 36 x 28
-picture per dish, plus empty and dirty plates) and a preview sheet
+picture per dish, plus empty and dirty plates and empty drinks). The game
+draws them at 1x, so they have finer pixels than the 2x furniture; a
+plate is 28 pixels wide, 15% wider than the old plain plates and a preview sheet
 (food_options.png) next to this script.
 
 Each dish sits on a plate (or comes in its mug, goblet or bowl). The
@@ -31,7 +33,7 @@ def shade(c, f):
     return (min(255, int(c[0] * f)), min(255, int(c[1] * f)), min(255, int(c[2] * f)), c[3])
 
 
-def plate(d, rx=14, ry=7, rim=PLATE_RIM, face=PLATE):
+def plate(d, rx=13, ry=6.5, rim=PLATE_RIM, face=PLATE):
     """A round plate seen at the isometric angle (half as tall as wide)."""
     d.ellipse([C[0] - rx - 1, C[1] - ry - 1, C[0] + rx + 1, C[1] + ry + 1], fill=OUT)
     d.ellipse([C[0] - rx, C[1] - ry, C[0] + rx, C[1] + ry], fill=rim)
@@ -55,7 +57,7 @@ def steam(d, x, y):
 # ---------------------------------------------------------------------
 # Drinks
 # ---------------------------------------------------------------------
-def tankard(liquid, foam, wood=(150, 100, 55, 255)):
+def tankard(liquid, foam, wood=(150, 100, 55, 255), empty=False):
     img, d = new()
     x0, x1, top, bottom = 12, 23, 6, 24
     d.rectangle([x0 - 1, top - 1, x1 + 1, bottom + 1], fill=OUT)
@@ -65,6 +67,9 @@ def tankard(liquid, foam, wood=(150, 100, 55, 255)):
     d.line([(x0 + 2, top), (x0 + 2, bottom)], fill=shade(wood, 1.2))
     d.rectangle([x1 + 2, top + 4, x1 + 4, bottom - 5], fill=OUT)   # handle
     d.rectangle([x1 + 2, top + 5, x1 + 3, bottom - 6], fill=wood)
+    if empty:   # just the dark inside of the mug
+        d.ellipse([x0, top - 2, x1, top + 1], fill=shade(wood, 0.5))
+        return img
     d.ellipse([x0 - 1, top - 3, x1 + 1, top + 2], fill=foam)        # foam spilling over
     d.point((x0 + 3, top - 2), fill=(255, 255, 255, 255))
     if liquid:
@@ -72,11 +77,11 @@ def tankard(liquid, foam, wood=(150, 100, 55, 255)):
     return img
 
 
-def ale():
-    return tankard((214, 150, 50, 255), (250, 246, 230, 255))
+def ale(empty=False):
+    return tankard((214, 150, 50, 255), (250, 246, 230, 255), empty=empty)
 
 
-def mead():
+def mead(empty=False):
     """Honey mead in a clay cup, with a piece of honeycomb beside it."""
     img, d = new()
     plate(d, 9, 4.5)
@@ -84,25 +89,27 @@ def mead():
     d.polygon([(13, 7), (21, 7), (20, 19), (14, 19)], fill=(190, 120, 80, 255))
     d.line([(14, 8), (14, 18)], fill=(215, 150, 105, 255))
     d.ellipse([12, 4, 22, 9], fill=OUT)
-    d.ellipse([13, 5, 21, 8], fill=(240, 180, 60, 255))           # golden mead
-    d.polygon([(24, 16), (29, 16), (30, 19), (25, 20)], fill=(235, 175, 50, 255))   # honeycomb
-    for x, y in ((26, 17), (28, 18)):
-        d.point((x, y), fill=(190, 120, 30, 255))
+    d.ellipse([13, 5, 21, 8], fill=(110, 70, 50, 255) if empty else (240, 180, 60, 255))   # golden mead
+    if not empty:
+        d.polygon([(24, 16), (29, 16), (30, 19), (25, 20)], fill=(235, 175, 50, 255))   # honeycomb
+        for x, y in ((26, 17), (28, 18)):
+            d.point((x, y), fill=(190, 120, 30, 255))
     return img
 
 
-def wine():
+def wine(empty=False):
     """Elven wine in a silver goblet, with a little bunch of grapes."""
     img, d = new()
     plate(d, 9, 4.5)
     d.ellipse([12, 3, 22, 9], fill=OUT)
     d.ellipse([13, 4, 21, 8], fill=(205, 210, 225, 255))
-    d.ellipse([14, 4, 20, 7], fill=(120, 30, 70, 255))           # the wine
+    d.ellipse([14, 4, 20, 7], fill=(150, 150, 165, 255) if empty else (120, 30, 70, 255))   # the wine
     d.polygon([(13, 7), (21, 7), (18, 12), (16, 12)], fill=(205, 210, 225, 255))
     d.line([(17, 12), (17, 18)], fill=(170, 175, 190, 255), width=2)   # stem
     d.ellipse([14, 17, 20, 20], fill=(170, 175, 190, 255))         # foot
-    for x, y in ((25, 15), (27, 15), (26, 17), (28, 17), (27, 19)):   # grapes
-        d.ellipse([x - 1, y - 1, x + 1, y + 1], fill=(110, 60, 140, 255))
+    if not empty:
+        for x, y in ((25, 15), (27, 15), (26, 17), (28, 17), (27, 19)):   # grapes
+            d.ellipse([x - 1, y - 1, x + 1, y + 1], fill=(110, 60, 140, 255))
     return img
 
 
@@ -185,7 +192,7 @@ def feast():
     """The Dragonfire Feast: a gold platter heaped with roast, grapes,
     bread and a drumstick, with a little dragon-flame on top."""
     img, d = new()
-    plate(d, 16, 8, rim=GOLD, face=(250, 235, 190, 255))
+    plate(d, 15, 7.5, rim=GOLD, face=(250, 235, 190, 255))
     blob(d, 17, 15, 7, 4, (165, 85, 40, 255))                        # roast
     blob(d, 8, 18, 3, 2, (210, 160, 90, 255))                        # bread
     blob(d, 27, 17, 3, 2, (200, 90, 40, 255))                        # drumstick
@@ -215,11 +222,13 @@ def dirty_plate():
 
 DISHES = {"ale": ale, "stew": stew, "mead": mead, "boar": boar, "cheese": cheese,
           "wings": wings, "wine": wine, "phoenix": phoenix, "feast": feast,
-          "plate": empty_plate, "dirty": dirty_plate}
+          "plate": empty_plate, "dirty": dirty_plate,
+          # what a finished drink leaves behind
+          "ale_empty": lambda: ale(True), "mead_empty": lambda: mead(True), "wine_empty": lambda: wine(True)}
 NAMES = {"ale": "Dragon Ale", "stew": "Mushroom Stew", "mead": "Honey Mead", "boar": "Roast Boar",
          "cheese": "Troll Cheese", "wings": "Wyvern Wings", "wine": "Elven Wine",
          "phoenix": "Phoenix Roast", "feast": "Dragonfire Feast", "plate": "(empty plate)",
-         "dirty": "(dirty plate)"}
+         "dirty": "(dirty plate)", "ale_empty": "", "mead_empty": "", "wine_empty": ""}
 
 
 if __name__ == "__main__":
@@ -239,7 +248,7 @@ if __name__ == "__main__":
     table2 = table.resize((128, 144), Image.NEAREST)
     font = ImageFont.load_default(size=14)
     Z = 4
-    names = [n for n in DISHES if n not in ("plate",)]
+    names = [n for n in DISHES if n not in ("plate",) and not n.endswith("_empty")]
     cw, ch = FW * Z + 30, FH * Z + 150
     sheet = Image.new("RGBA", (cw * 6 + 10, ch * 2 + 10), (60, 54, 48, 255))
     sd = ImageDraw.Draw(sheet)
@@ -258,7 +267,7 @@ if __name__ == "__main__":
     od = ImageDraw.Draw(old)
     for dx, dy in ((-11, -3), (11, 3)):
         cx, cy = top[0] + dx, top[1] + dy
-        od.ellipse([cx - 12, cy - 6, cx + 12, cy + 6], fill=OUT)
+        od.ellipse([cx - 12, cy - 6, cx + 12, cy + 6], fill=OUT)   # the old plates: 24 wide (new: 28)
         od.ellipse([cx - 11, cy - 5.5, cx + 11, cy + 5.5], fill=PLATE)
         od.ellipse([cx - 7.5, cy - 4, cx + 7.5, cy + 3], fill=(195, 112, 50, 255))
     sheet.alpha_composite(old.crop((10, 40, 118, 140)), (x0 + 30, y0 + FH * Z + 22))

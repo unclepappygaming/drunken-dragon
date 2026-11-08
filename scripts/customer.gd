@@ -196,7 +196,7 @@ func _process(delta: float) -> void:
 					share += GuestTypes.GUARD_TIP
 				var price: int = roundi(order["price"] * share)
 				GameManager.earn(price)
-				grid.finish_dish(table_cell)   # leaves an empty plate behind
+				grid.finish_dish(table_cell, _seat)   # leaves an empty plate behind
 				_bubble = "+%dg" % price
 				_start_leaving("served")
 
@@ -227,7 +227,7 @@ func serve_food() -> bool:
 		return false
 	state = State.EATING
 	_timer = EAT_TIME
-	grid.serve_dish(table_cell)
+	grid.serve_dish(table_cell, _seat, order.get("id", "plate"))
 	_patience_at_serve = patience
 	_bubble = "Yum!"
 	return true

@@ -40,6 +40,10 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
   plates; if it's full, cooks wait.
 - **Waiters** take orders, collect dishes from the front of the pass (they
   never enter the kitchen) and carry them to the table.
+- **Every dish has its own look**: ale in a tankard, stew in a steaming
+  bowl, a roast boar on the bone, wyvern wings, a flaming phoenix roast,
+  the Dragonfire Feast on a gold platter... You see them on the pass, on
+  the waiters' trays, in the cooks' hands, and in front of each guest.
 - **Tables stay bare until food arrives.** When guests finish, their empty
   plates stay behind, and nobody new can sit there until a waiter clears
   them and takes them back to the pass for washing. Waiters serve food
@@ -190,6 +194,7 @@ The floor and walls are drawn in code; characters and furniture are pixel-art sp
 | `shaders/palette_swap.gdshader` | Gives each staff member their own skin and hair color |
 | `tools/sprites/make_sprites.py` | Draws the pixel-art staff and guest sprite sheets (`python3 tools/sprites/make_sprites.py`) |
 | `tools/sprites/make_outdoors.py` | Draws the scenery: trees, bushes, rocks, lamp posts, a well, fences, houses and market stalls |
+| `tools/sprites/make_food.py` | Draws every dish, empty and dirty plates, and finished drinks |
 | `tools/sprites/make_furniture.py` | Draws the isometric furniture: table, brick stove (with fire frames) and the serving-hatch pass |
 
 ## Roadmap
