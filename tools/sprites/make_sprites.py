@@ -70,6 +70,31 @@ def outline(img):
                     break
 
 
+def shade_pass(img, keep):
+    """Light from the upper left: pixels on an upper or left edge get
+    lighter, lower or right edges darker, and a thin shadow falls under
+    anything drawn over something else. Skin and hair are left alone:
+    the game recolours exactly those colours for each person."""
+    src = img.copy()
+
+    def at(x, y):
+        if 0 <= x < W and 0 <= y < H:
+            return src.getpixel((x, y))
+        return (0, 0, 0, 0)
+    for y in range(H):
+        for x in range(W):
+            c = src.getpixel((x, y))
+            if c[3] < 200 or c in keep:
+                continue
+            up, left, down, right = at(x, y - 1), at(x - 1, y), at(x, y + 1), at(x + 1, y)
+            if up[3] < 100 or left[3] < 100:
+                img.putpixel((x, y), shade(c, 1.15))
+            elif down[3] < 100 or right[3] < 100:
+                img.putpixel((x, y), shade(c, 0.8))
+            elif up[3] >= 200 and up[:3] != c[:3] and up not in keep and sum(up[:3]) < sum(c[:3]):
+                img.putpixel((x, y), shade(c, 0.88))   # shadow under a darker piece above
+
+
 def shade(c, f):
     return (int(c[0] * f), int(c[1] * f), int(c[2] * f), 255)
 
@@ -148,7 +173,12 @@ def draw(ch, view="front", step=0):
     # Props held in front (tray, spoon...)
     for layer in ch.get("props", []):
         layer(img, view, body_y0, step)
+    # Extra details (towels, notepads, belts...) drawn over everything
+    for layer in ch.get("extras", []):
+        layer(img, view, body_y0, body_y1, head_cy)
 
+    if ch.get("shade"):
+        shade_pass(img, [SKIN, SKIN_DARK, BLUSH, EYE, ch.get("hair_key")])
     outline(img)
     # Shadow goes under everything, after the outline.
     shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -389,6 +419,155 @@ WAITERS = {
         props=[tray(mug=False)],
     ),
 }
+
+
+# ---------------------------------------------------------------------
+# Extra details (layer(img, view, y0, y1, head_cy)), drawn last
+# ---------------------------------------------------------------------
+GOLD_PX = (225, 185, 60, 255)
+WHITE = (248, 246, 238, 255)
+
+
+def towel(stripe):
+    """A cloth over the left shoulder."""
+    def layer(img, view, y0, y1, cy):
+        if view == "front":
+            rect(img, 19, y0, 21, y0 + 5, WHITE)
+            px(img, 20, y0 + 2, stripe); px(img, 19, y0 + 2, stripe); px(img, 21, y0 + 2, stripe)
+        elif view == "side":
+            rect(img, 13, y0, 15, y0 + 3, WHITE)
+            px(img, 14, y0 + 1, stripe)
+    return layer
+
+
+def notepad():
+    """An apron pocket with an order pad and a pencil."""
+    def layer(img, view, y0, y1, cy):
+        if view == "front":
+            rect(img, 12, y1 - 3, 15, y1 - 1, shade(WHITE, 0.82))   # pocket
+            rect(img, 13, y1 - 5, 14, y1 - 3, WHITE)                 # pad
+            px(img, 15, y1 - 5, (230, 190, 60, 255)); px(img, 15, y1 - 4, (230, 190, 60, 255))   # pencil
+    return layer
+
+
+def watch_chain():
+    def layer(img, view, y0, y1, cy):
+        if view == "front":
+            for x, y in ((11, y0 + 4), (12, y0 + 5), (13, y0 + 5)):
+                px(img, x, y, GOLD_PX)
+    return layer
+
+
+def lace_hem():
+    """White lace dots along the bottom of the apron."""
+    def layer(img, view, y0, y1, cy):
+        if view == "front":
+            for x in range(11, 21, 2):
+                px(img, x, y1 + 2, WHITE)
+    return layer
+
+
+def suspenders(color):
+    def layer(img, view, y0, y1, cy):
+        if view == "front":
+            rect(img, 12, y0, 12, y1, color)
+            rect(img, 19, y0, 19, y1, color)
+            px(img, 12, y0 + 3, GOLD_PX); px(img, 19, y0 + 3, GOLD_PX)
+        elif view == "side":
+            rect(img, 16, y0, 16, y1, color)
+    return layer
+
+
+def work_belt():
+    """A leather belt with a buckle and a little knife."""
+    def layer(img, view, y0, y1, cy):
+        if view == "front":
+            rect(img, 10, y1 - 4, 21, y1 - 4, (90, 60, 35, 255))
+            px(img, 15, y1 - 4, GOLD_PX); px(img, 16, y1 - 4, GOLD_PX)
+            rect(img, 20, y1 - 3, 20, y1 - 1, (190, 195, 205, 255))   # knife
+        elif view == "side":
+            rect(img, 12, y1 - 4, 19, y1 - 4, (90, 60, 35, 255))
+    return layer
+
+
+def beard_beads():
+    def layer(img, view, y0, y1, cy):
+        if view == "front":
+            px(img, 14, cy + 9, GOLD_PX); px(img, 17, cy + 9, GOLD_PX)
+        elif view == "side":
+            px(img, 18, cy + 8, GOLD_PX)
+    return layer
+
+
+def toque_pleats():
+    def layer(img, view, y0, y1, cy):
+        if view != "back":
+            for x in (13, 16, 19):
+                px(img, x, cy - 9, (215, 215, 210, 255)); px(img, x, cy - 10, (215, 215, 210, 255))
+    return layer
+
+
+def checked_trousers():
+    def layer(img, view, y0, y1, cy):
+        for y in range(25, 28):
+            for x in range(12, 20):
+                if (x + y) % 2 == 0 and img.getpixel((x, y + OFFSET_Y))[:3] == (80, 80, 90):
+                    px(img, x, y, (110, 110, 120, 255))
+    return layer
+
+
+def rolled_sleeves():
+    """Bare forearms below rolled-up sleeves."""
+    def layer(img, view, y0, y1, cy):
+        if view == "front":
+            rect(img, 8, y0 + 4, 9, y0 + 6, SKIN)
+            rect(img, 22, y0 + 4, 23, y0 + 6, SKIN)
+            rect(img, 8, y0 + 3, 9, y0 + 3, WHITE); rect(img, 22, y0 + 3, 23, y0 + 3, WHITE)
+    return layer
+
+
+# The extra details for each staff type, for the "more detail" option.
+DETAILS = {
+    "A. Classic Chef": [toque_pleats(), checked_trousers(), towel((200, 50, 45, 255))],
+    "B. Tavern Cook": [rolled_sleeves(), work_belt(), towel((60, 110, 170, 255))],
+    "C. Dwarf Cook": [beard_beads(), rolled_sleeves()],
+    "A. Barkeep": [watch_chain(), towel((60, 110, 70, 255))],
+    "B. Serving Maid": [notepad(), lace_hem()],
+    "C. Halfling Server": [suspenders((110, 70, 40, 255)), notepad()],
+}
+HAIR_KEYS = {
+    "A. Classic Chef": (110, 70, 40, 255), "B. Tavern Cook": (120, 80, 50, 255), "C. Dwarf Cook": (200, 110, 50, 255),
+    "A. Barkeep": (160, 100, 50, 255), "B. Serving Maid": (180, 120, 60, 255), "C. Halfling Server": (95, 60, 35, 255),
+}
+
+
+def detail_options(path):
+    """Each staff member three ways: as now, shaded, shaded with details;
+    front, side and carrying, zoomed in."""
+    from PIL import ImageFont
+    font = ImageFont.load_default(size=14)
+    staff = list(COOKS.items()) + list(WAITERS.items())
+    Z, gap = 4, 6
+    cell = (W * Z + gap) * 3 + 16
+    sheet_img = Image.new("RGBA", (130 + cell * 3, 30 + len(staff) * (H * Z + 12)), (60, 54, 48, 255))
+    d = ImageDraw.Draw(sheet_img)
+    for col, label in enumerate(["A  As now", "B  Shaded", "C  Shaded + details"]):
+        d.text((130 + col * cell + 10, 8), label, fill=(250, 230, 180), font=font)
+    for r, (name, ch) in enumerate(staff):
+        y0 = 30 + r * (H * Z + 12)
+        d.text((8, y0 + H * Z // 2 - 8), name.split(". ")[1], fill=(240, 240, 235), font=font)
+        versions = [dict(ch), dict(ch, shade=True, hair_key=HAIR_KEYS[name]),
+                    dict(ch, shade=True, hair_key=HAIR_KEYS[name], extras=DETAILS[name])]
+        for col, c in enumerate(versions):
+            pics = [draw(c, "front", 0), draw(c, "side", 1)]
+            if name in WAITERS:
+                pics.append(draw(dict(c, props=[tray(mug=False, plate=True)]), "front", 0))
+            else:
+                pics.append(draw(c, "front", 1))
+            for i, pic in enumerate(pics):
+                big = pic.resize((W * Z, H * Z), Image.NEAREST)
+                sheet_img.alpha_composite(big, (130 + col * cell + i * (W * Z + gap), y0))
+    sheet_img.save(path)
 
 
 def frames(ch):
@@ -794,5 +973,6 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(root, "assets", "sprites", "guests"), exist_ok=True)
     export_guest_sheets(os.path.join(root, "assets", "sprites", "guests"))
     sheet([("Cooks", COOKS), ("Waiters", WAITERS)], os.path.join(here, "staff_options.png"))
+    detail_options(os.path.join(here, "staff_detail_options.png"))
     sheet([("Guests", {k.title(): v for k, v in GUESTS.items()})], os.path.join(here, "guest_options.png"))
     print("wrote previews")
