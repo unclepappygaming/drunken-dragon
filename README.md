@@ -182,12 +182,14 @@ The floor and walls are drawn in code; characters and furniture are pixel-art sp
 | `scripts/walker.gd` | Shared walking code for anyone who moves around furniture |
 | `scripts/customer.gd` | One guest's state machine |
 | `scripts/cook.gd` / `waiter.gd` | Staff behavior |
+| `scripts/scenery.gd` | The world around the tavern: a meadow, a busy medieval city (the Grand Hall's) or a fae forest |
 | `scripts/hud.gd` | All the on-screen UI, built in code |
 | `scripts/tavern_camera.gd` | Drag, pinch and wheel camera; turns taps into build clicks |
 | `scripts/staff_profiles.gd` | Staff types, traits, wages, names and looks |
 | `scripts/guest_types.gd` | Guest types, how often they come, and their looks |
 | `shaders/palette_swap.gdshader` | Gives each staff member their own skin and hair color |
 | `tools/sprites/make_sprites.py` | Draws the pixel-art staff and guest sprite sheets (`python3 tools/sprites/make_sprites.py`) |
+| `tools/sprites/make_outdoors.py` | Draws the scenery: trees, bushes, rocks, lamp posts, a well, fences, houses and market stalls |
 | `tools/sprites/make_furniture.py` | Draws the isometric furniture: table, brick stove (with fire frames) and the serving-hatch pass |
 
 ## Roadmap
@@ -227,6 +229,9 @@ The floor and walls are drawn in code; characters and furniture are pixel-art sp
    - ✅ Plates on tables, and waiters clear them after guests leave
    - ✅ Decorations: seven floor pieces to buy and fifteen wall trophies
      earned by achievements, some animated
+   - ✅ Scenery around the building: a meadow for the tavern, a busy
+     medieval city (with townsfolk walking the streets) for the Grand Hall,
+     and a fae forest
    - ⬜ Sprites for the floor and walls
    - Sound effects and music (they start after the first tap, as browsers require)
 7. ⬜ **The Grand Hall, continued**

@@ -37,6 +37,7 @@ const LINE_GAP: float = 46.0   # pixels between people in the line
 @onready var spawn_timer: Timer = $SpawnTimer
 @onready var hud: TavernHUD = $HUD
 @onready var camera: TavernCamera = $Camera
+var scenery: Scenery
 
 var _waiting_for_last_guests: bool = false
 # Guests waiting outside for a table, first in line first.
@@ -101,7 +102,15 @@ func _ready() -> void:
 		hud.show_summary(
 			"Welcome back to\nThe Drunken Dragon!\n\n%s\nGold: %d\nFame: %d" % [progress, GameManager.gold, GameManager.fame],
 			true)
-	RenderingServer.set_default_clear_color(_street_color())
+	# The world around the tavern, drawn behind everything.
+	scenery = Scenery.new()
+	scenery.grid = grid
+	scenery.z_index = -2
+	add_child(scenery)
+	move_child(scenery, 0)
+	scenery.set_style(Scenery.style_for_location())
+	grid.layout_changed.connect(scenery.refresh)
+	RenderingServer.set_default_clear_color(scenery.base_color())
 	_update_staff_display()
 	_fit_camera()
 	hud.set_day_button("Open\nDay %d" % (GameManager.day + 1), true)
@@ -402,7 +411,8 @@ func _on_move_requested() -> void:
 		return
 	var size: Vector2i = GameManager.floor_size()
 	grid.start_grand_hall(size.x, size.y)
-	RenderingServer.set_default_clear_color(_street_color())
+	scenery.set_style(Scenery.style_for_location())
+	RenderingServer.set_default_clear_color(scenery.base_color())
 	_fit_camera()
 	hud.close_expand_panel()
 	_announce_fame()   # the "Move to the Grand Hall" milestone
