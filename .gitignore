@@ -2,3 +2,4 @@
 .godot/
 # Exported builds live outside the project, but just in case.
 *.tmp
+__pycache__/
