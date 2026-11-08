@@ -42,9 +42,10 @@ const SAVE_PATH: String = "user://save.json"
 # quests), version 4 expansions and the door, version 5 fame milestones,
 # version 6 named staff with types and looks, version 7 the kitchen zone,
 # version 8 the location (the tavern or the Grand Hall), version 9 tables
-# with chairs (older one-square tables become 3 x 1 tables on loading).
+# with chairs (older one-square tables become 3 x 1 tables on loading),
+# version 10 decorations.
 # Older saves still load.
-const SAVE_VERSION: int = 9
+const SAVE_VERSION: int = 10
 
 # Everything the player can build. The key ("table") is the ID the
 # other scripts use; the inner Dictionary holds its details.
@@ -54,6 +55,36 @@ const FURNITURE: Dictionary = {
 	"table": {"name": "Table", "cost": 100, "color": Color(0.55, 0.36, 0.2)},
 	"long_table": {"name": "Long Table", "cost": 220, "color": Color(0.55, 0.36, 0.2)},
 	"kitchen": {"name": "Hearth", "cost": 250, "color": Color(0.7, 0.25, 0.15)},
+}
+
+# DECORATIONS are just for looks. Floor pieces are bought ("cost"); a
+# few need a rank first ("fame"). size 2 = it covers 2 x 2 squares.
+# walk = people can walk over it (the rug). frames > 1 = it's animated.
+# Wall pieces hang on the back walls and are never bought: each one is
+# earned by an achievement ("stat" reaching "goal"; "task" describes it).
+const DECOR: Dictionary = {
+	"fern":      {"name": "Potted Fern", "where": "floor", "cost": 60},
+	"barrels":   {"name": "Ale Barrels", "where": "floor", "cost": 90},
+	"rug":       {"name": "Rug", "where": "floor", "cost": 120, "walk": true},
+	"armour":    {"name": "Suit of Armour", "where": "floor", "cost": 250},
+	"bookshelf": {"name": "Bookshelf", "where": "floor", "cost": 250},
+	"fireplace": {"name": "Fireplace", "where": "floor", "cost": 400, "frames": 3},
+	"dragon":    {"name": "Dragon Statue", "where": "floor", "cost": 1500, "size": 2, "fame": 140},
+	"painting":  {"name": "Painting", "where": "wall", "stat": "best_fame", "goal": 10, "task": "Reach Local Haunt"},
+	"shield":    {"name": "Shield & Swords", "where": "wall", "stat": "guest:guard", "goal": 25, "task": "Serve 25 Town Guards"},
+	"antlers":   {"name": "Antlers", "where": "wall", "stat": "dish:boar", "goal": 100, "task": "Serve 100 Roast Boars"},
+	"lantern":   {"name": "Faerie Lantern", "where": "wall", "stat": "days", "goal": 20, "task": "Open the tavern for 20 days", "frames": 4},
+	"wreath":    {"name": "Moonflower Wreath", "where": "wall", "stat": "dish:mead", "goal": 50, "task": "Serve 50 Honey Meads"},
+	"glowcap":   {"name": "Glowcap Shelf", "where": "wall", "stat": "dish:stew", "goal": 100, "task": "Serve 100 Mushroom Stews"},
+	"wings":     {"name": "Gossamer Wings", "where": "wall", "stat": "perfect_days", "goal": 5, "task": "Have 5 perfect days"},
+	"mirror":    {"name": "Fae Mirror", "where": "wall", "stat": "triumphs", "goal": 3, "task": "Host 3 triumphant banquets"},
+	"crown":     {"name": "Faerie Crown", "where": "wall", "stat": "recipes_learned", "goal": 6, "task": "Learn every recipe"},
+	"wyvern":    {"name": "Wyvern Head", "where": "wall", "stat": "dish:wings", "goal": 30, "task": "Serve 30 Wyvern Wings", "frames": 4},
+	"centaur":   {"name": "Centaur Head", "where": "wall", "stat": "guest:adventurer", "goal": 50, "task": "Serve 50 adventurers", "frames": 4},
+	"griffon":   {"name": "Griffon Head", "where": "wall", "stat": "best_fame", "goal": 90, "task": "Reach Famed Hall", "frames": 4},
+	"unicorn":   {"name": "Unicorn Head", "where": "wall", "stat": "nobles", "goal": 25, "task": "Serve 25 nobles", "frames": 4},
+	"minotaur":  {"name": "Minotaur Head", "where": "wall", "stat": "served", "goal": 500, "task": "Serve 500 guests", "frames": 4},
+	"kraken":    {"name": "Kraken Tentacles", "where": "wall", "stat": "moved", "goal": 1, "task": "Move to the Grand Hall", "frames": 4},
 }
 
 # Staff types, traits and wages live in staff_profiles.gd. Each day a few
@@ -283,6 +314,7 @@ func open_shop(banquet: bool = false) -> void:
 	if banquet:
 		stats["last_banquet_day"] = day
 	is_open = true
+	add_stat("days")
 	minutes_since_open = 0.0
 	_last_minute_shown = -1
 	today_income = 0
@@ -351,7 +383,7 @@ func reset() -> void:
 # main.gd supplies the furniture, door and staff (a list of profiles);
 # we add gold, fame, day, recipes, stats and expansions.
 # ---------------------------------------------------------------------
-func save_game(layout: Array, door: Array, kitchen: Array, staff: Array) -> void:
+func save_game(layout: Array, door: Array, kitchen: Array, staff: Array, decor: Dictionary = {}) -> void:
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"day": day,
@@ -362,6 +394,7 @@ func save_game(layout: Array, door: Array, kitchen: Array, staff: Array) -> void
 		"kitchen": kitchen,
 		"expansions": expansions_built,
 		"location": location,
+		"decor": decor,
 		"staff": staff,
 		"recipes": known_recipes,
 		"menu": menu,
@@ -401,6 +434,8 @@ func load_game() -> Dictionary:
 	stats = saved_stats if typeof(saved_stats) == TYPE_DICTIONARY else {}
 	# Saves from before stats existed: count the fame they already have.
 	stats["best_fame"] = maxi(stat("best_fame"), fame)
+	# Saves from before the "days" count (a trophy needs it).
+	stats["days"] = maxi(stat("days"), day)
 	# Saves from before the Grand Hall are in the tavern.
 	location = "grand_hall" if parsed.get("location", "") == "grand_hall" else "tavern"
 	# Saves from before expansions: the original floor.
@@ -521,9 +556,11 @@ func add_stat(key: String, amount: int = 1) -> void:
 
 
 # Called when a guest pays and leaves happy.
-func record_served(order_id: String, noble: bool) -> void:
+func record_served(order_id: String, noble: bool, guest_type: String = "") -> void:
 	add_stat("served")
 	add_stat("dish:" + order_id)
+	if guest_type != "":
+		add_stat("guest:" + guest_type)
 	if noble:
 		add_stat("nobles")
 
@@ -542,6 +579,32 @@ func unlock_progress(id: String) -> int:
 
 # Unlocks every recipe whose goal has been reached. Returns their IDs so
 # main.gd can announce them.
+# Wall decorations earned so far (marked once in stats, so a trophy stays
+# earned). Returns the ones just earned, so main.gd can announce them.
+func check_trophies() -> Array[String]:
+	var earned: Array[String] = []
+	for id in DECOR:
+		var info: Dictionary = DECOR[id]
+		if info["where"] != "wall" or stat("trophy:" + id) > 0:
+			continue
+		if stat(info["stat"]) >= info["goal"]:
+			stats["trophy:" + id] = 1
+			earned.append(id)
+	return earned
+
+
+func has_trophy(id: String) -> bool:
+	return stat("trophy:" + id) > 0
+
+
+# Can this decoration be placed? Floor pieces may need a rank first.
+func decor_available(id: String) -> bool:
+	var info: Dictionary = DECOR[id]
+	if info["where"] == "wall":
+		return has_trophy(id)
+	return stat("best_fame") >= info.get("fame", 0)
+
+
 func check_unlocks() -> Array[String]:
 	var unlocked: Array[String] = []
 	for id in RECIPES:

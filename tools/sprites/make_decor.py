@@ -419,9 +419,36 @@ def wall_patch(img):
         d.line([(a[0], a[1] - top), (b[0], b[1] - top)], fill=(105, 66, 38, 255), width=2)
 
 
+def strip(frames):
+    """Frames side by side in one image, as the game reads them."""
+    w, h = frames[0].size
+    out = Image.new("RGBA", (w * len(frames), h), (0, 0, 0, 0))
+    for i, f in enumerate(frames):
+        out.paste(f, (i * w, 0))
+    return out
+
+
+# The game's decorations: id -> list of frames. Wall pieces are drawn on
+# the top wall; the game mirrors them for the left wall.
+def game_pieces():
+    return {
+        "fern": [plant()], "barrels": [barrels()], "armour": [armor()],
+        "bookshelf": [bookshelf()], "fireplace": [fireplace(f) for f in range(3)],
+        "rug": [rug()], "dragon": [dragon_statue()],
+        "painting": [painting()], "shield": [shield()], "antlers": [antlers()],
+        "lantern": [fae_lantern(f) for f in range(4)], "wreath": [moonflower_wreath()],
+        "glowcap": [glowcap_shelf()], "wings": [gossamer_wings()], "mirror": [fae_mirror()],
+        "crown": [faerie_crown()],
+    }
+
+
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname(os.path.dirname(here))
+    out = os.path.join(root, "assets", "sprites", "decor")
+    os.makedirs(out, exist_ok=True)
+    for name, frames in game_pieces().items():
+        strip(frames).save(os.path.join(out, name + ".png"))
     guests = os.path.join(root, "assets", "sprites", "guests")
     FLOOR = [(237, 201, 138, 255), (226, 185, 118, 255)]
 

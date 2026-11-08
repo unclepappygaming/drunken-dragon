@@ -100,6 +100,15 @@ var furniture: Dictionary = {}
 # and chairs[1] share the first tabletop, chairs[2] and [3] the second.
 var tables: Dictionary = {}
 var _table_of: Dictionary = {}   # every tabletop and chair square -> its table's anchor
+# DECORATIONS, just for looks. A floor piece is known by its first square:
+#   decor[anchor] = {"id": ..., "cells": [every square it covers]}
+# Solid pieces are also "decor" in `furniture`; a rug isn't (people walk
+# over it), but nothing can be built on it. Wall pieces hang on the back
+# walls: wall_decor["top:3"] or ["left:5"] = id (one piece per stretch).
+var decor: Dictionary = {}
+var _decor_of: Dictionary = {}   # every square a floor piece covers -> its anchor
+var wall_decor: Dictionary = {}
+var decor_choice: String = ""    # the piece the "decor" build tool places
 # table anchor -> the Customer who took it (the first of their group), or null if free
 var table_owner: Dictionary = {}
 # table cell -> {"full": plates being eaten, "dirty": empty plates left
@@ -149,6 +158,18 @@ func _ready() -> void:
 # square you hit.
 func handle_tap(world_pos: Vector2) -> void:
 	if build_type == "":
+		return
+	# Wall pieces go on the back walls, above the floor.
+	var wall: String = _wall_at(world_pos - position)
+	if build_type == "decor" and GameManager.DECOR[decor_choice]["where"] == "wall":
+		_try_hang(wall)
+		return
+	if build_type == "remove" and wall_decor.has(wall):
+		var taken: String = wall_decor[wall]
+		wall_decor.erase(wall)
+		queue_redraw()
+		layout_changed.emit()
+		build_message.emit("Took down the %s. Hang it again from Decor." % GameManager.DECOR[taken]["name"])
 		return
 	var cell: Vector2i = cell_at_world(world_pos)
 	if cell != NO_CELL:
@@ -276,6 +297,9 @@ func _process(delta: float) -> void:
 		_props[cell].queue_redraw()
 	if _props.has(expo_cell()):
 		_props[expo_cell()].queue_redraw()
+	for anchor in decor:   # animated decorations (the fireplace)
+		if _props.has(anchor) and GameManager.DECOR[decor[anchor]["id"]].get("frames", 1) > 1:
+			_props[anchor].queue_redraw()
 
 
 # ---------------------------------------------------------------------
@@ -697,7 +721,7 @@ func _kitchen_fits(pos: Vector2i, width: int, solid: Dictionary) -> String:
 func _layout_with_kitchen(pos: Vector2i, width: int) -> Dictionary:
 	var solid: Dictionary = {}
 	for cell in furniture:
-		if furniture[cell] in ["table", "chair"]:
+		if furniture[cell] in ["table", "chair", "decor"]:
 			solid[cell] = furniture[cell]
 	for cell in hearths:
 		var slot: int = cell.x - kitchen_pos.x
@@ -717,8 +741,10 @@ func _try_move_kitchen(cell: Vector2i) -> void:
 		return
 	var tables: Dictionary = {}
 	for spot in furniture:
-		if furniture[spot] in ["table", "chair"]:
+		if furniture[spot] in ["table", "chair", "decor"]:
 			tables[spot] = true
+	for spot in _decor_of:   # rugs too
+		tables[spot] = true
 	var problem: String = _kitchen_fits(cell, kitchen_width, tables)
 	if problem != "":
 		build_message.emit(problem)
@@ -768,8 +794,10 @@ func try_widen_kitchen() -> void:
 		return
 	var tables: Dictionary = {}
 	for spot in furniture:
-		if furniture[spot] in ["table", "chair"]:
+		if furniture[spot] in ["table", "chair", "decor"]:
 			tables[spot] = true
+	for spot in _decor_of:   # rugs too
+		tables[spot] = true
 	var problem: String = _kitchen_fits(kitchen_pos, kitchen_width + 1, tables)
 	if problem != "":
 		build_message.emit(problem.replace("doesn't fit there", "has no room to grow"))
@@ -821,7 +849,7 @@ func _rebuild_kitchen(pos: Vector2i, width: int) -> void:
 		if is_instance_valid(hearths[cell]["cook"]):
 			hearths[cell]["cook"].release_hearth()
 	for cell in furniture.keys():
-		if not furniture[cell] in ["table", "chair"]:
+		if not furniture[cell] in ["table", "chair", "decor"]:
 			furniture.erase(cell)
 			_remove_prop(cell)
 	hearths.clear()
@@ -870,6 +898,9 @@ func load_layout(layout: Array, kitchen = null) -> void:
 	furniture.clear()
 	tables.clear()
 	_table_of.clear()
+	decor.clear()          # decorations are loaded separately (load_decor);
+	_decor_of.clear()      # moving to the Grand Hall leaves them behind
+	wall_decor.clear()
 	table_owner.clear()
 	hearths.clear()
 	expo_plates.clear()
@@ -969,7 +1000,10 @@ func _try_build(cell: Vector2i) -> void:
 	if build_type in ["table", "long_table"]:
 		_try_build_table(cell)
 		return
-	if furniture.has(cell):
+	if build_type == "decor":
+		_try_place_decor(cell)
+		return
+	if _blocked(cell):
 		build_message.emit("That square is taken.")
 		return
 	if build_type == "kitchen" and not on_line(cell):
@@ -1022,7 +1056,7 @@ func _table_problem(kind: String, anchor: Vector2i, dir: Vector2i) -> String:
 	for cell in foot["tops"] + foot["chairs"]:
 		if not _in_bounds(cell):
 			return "Not enough room for the %s there." % GameManager.FURNITURE[kind]["name"]
-		if furniture.has(cell):
+		if _blocked(cell):
 			return "Something's in the way."
 		if in_kitchen(cell):
 			return "Tables can't go in the kitchen."
@@ -1140,6 +1174,15 @@ func _rebuild_front_walls() -> void:
 
 
 func _try_remove(cell: Vector2i) -> void:
+	if _decor_of.has(cell):
+		var anchor: Vector2i = _decor_of[cell]
+		var info: Dictionary = GameManager.DECOR[decor[anchor]["id"]]
+		var back: int = floori(info["cost"] / 2.0)
+		GameManager.refund(back)
+		_remove_decor(anchor)
+		layout_changed.emit()
+		build_message.emit("Sold the %s for %dg." % [info["name"], back])
+		return
 	if not furniture.has(cell):
 		return
 	var type: String = furniture[cell]
@@ -1178,6 +1221,170 @@ func _try_remove(cell: Vector2i) -> void:
 	build_message.emit("Sold for %dg." % refund)
 
 
+# ---------------------------------------------------------------------
+# Decorations
+# ---------------------------------------------------------------------
+# Squares nothing new can go on: furniture, decorations and rugs.
+func _blocked(cell: Vector2i) -> bool:
+	return furniture.has(cell) or _decor_of.has(cell)
+
+
+func _decor_cells(id: String, anchor: Vector2i) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = [anchor]
+	if GameManager.DECOR[id].get("size", 1) == 2:
+		cells.append_array([anchor + Vector2i(1, 0), anchor + Vector2i(0, 1), anchor + Vector2i(1, 1)])
+	return cells
+
+
+func _try_place_decor(anchor: Vector2i) -> void:
+	var id: String = decor_choice
+	var info: Dictionary = GameManager.DECOR[id]
+	if not GameManager.decor_available(id):
+		build_message.emit("The %s isn't available yet." % info["name"])
+		return
+	var in_use: Dictionary = _cells_in_use(null)
+	var solid: Dictionary = furniture.duplicate()
+	for cell in _decor_cells(id, anchor):
+		if not _in_bounds(cell):
+			build_message.emit("Not enough room there.")
+			return
+		if _blocked(cell) or in_kitchen(cell) or cell == expo_front() or cell == door_cell:
+			build_message.emit("Something's in the way.")
+			return
+		if in_use.has(cell) and not info.get("walk", false):
+			build_message.emit("Someone's in the way!")
+			return
+		if not info.get("walk", false):
+			solid[cell] = "decor"
+	if not _layout_works(solid, door_cell, kitchen_pos, kitchen_width):
+		build_message.emit("That would block someone's way!")
+		return
+	if not GameManager.try_spend(info["cost"]):
+		build_message.emit("Not enough gold!")
+		return
+	_place_decor(id, anchor)
+	layout_changed.emit()
+	build_message.emit("Placed the %s." % info["name"])
+
+
+func _place_decor(id: String, anchor: Vector2i) -> void:
+	var cells: Array[Vector2i] = _decor_cells(id, anchor)
+	decor[anchor] = {"id": id, "cells": cells}
+	var middle := Vector2.ZERO
+	for cell in cells:
+		_decor_of[cell] = anchor
+		middle += cell_center(cell)
+		if not GameManager.DECOR[id].get("walk", false):
+			furniture[cell] = "decor"
+			_set_solid(cell, true)
+	# Rugs lie flat and are drawn with the floor; everything else is a prop.
+	if not GameManager.DECOR[id].get("walk", false):
+		var prop: FloorProp = _new_prop("decor", anchor, middle / cells.size())
+		_props[anchor] = prop
+	queue_redraw()
+
+
+func _remove_decor(anchor: Vector2i) -> void:
+	for cell in decor[anchor]["cells"]:
+		_decor_of.erase(cell)
+		if furniture.get(cell, "") == "decor":
+			furniture.erase(cell)
+			_set_solid(cell, false)
+	_remove_prop(anchor)
+	decor.erase(anchor)
+	queue_redraw()
+
+
+# The stretch of back wall at `local_pos` ("top:x" or "left:y"), or "".
+func _wall_at(local_pos: Vector2) -> String:
+	var up := Vector2(0, -WALL_HEIGHT)
+	for x in cols:
+		var a: Vector2 = iso(Vector2(x, 0))
+		var b: Vector2 = iso(Vector2(x + 1, 0))
+		if Geometry2D.is_point_in_polygon(local_pos, PackedVector2Array([a, b, b + up, a + up])):
+			return "top:%d" % x
+	for y in rows:
+		var a: Vector2 = iso(Vector2(0, y))
+		var b: Vector2 = iso(Vector2(0, y + 1))
+		if Geometry2D.is_point_in_polygon(local_pos, PackedVector2Array([a, b, b + up, a + up])):
+			return "left:%d" % y
+	return ""
+
+
+# Stretches of wall that already have something: the door, windows and
+# (in the Grand Hall) banners.
+func _wall_taken_by_building(side: String, index: int) -> bool:
+	if door_side == side and door_index == index:
+		return true
+	return index % 3 == 1 or (GameManager.in_hall() and index % 3 == 2)
+
+
+func _try_hang(wall: String) -> void:
+	var id: String = decor_choice
+	var info: Dictionary = GameManager.DECOR[id]
+	if wall == "":
+		build_message.emit("Tap a stretch of the back wall.")
+		return
+	var parts: PackedStringArray = wall.split(":")
+	if _wall_taken_by_building(parts[0], int(parts[1])):
+		build_message.emit("There's a window or door there. Try another stretch of wall.")
+		return
+	if wall_decor.has(wall):
+		build_message.emit("Something already hangs there.")
+		return
+	if not GameManager.has_trophy(id):
+		build_message.emit("Earn the %s first: %s." % [info["name"], info["task"]])
+		return
+	# Each trophy is one of a kind: hanging it again moves it.
+	for spot in wall_decor.keys():
+		if wall_decor[spot] == id:
+			wall_decor.erase(spot)
+	wall_decor[wall] = id
+	queue_redraw()
+	layout_changed.emit()
+	build_message.emit("Hung the %s." % info["name"])
+
+
+func is_hung(id: String) -> bool:
+	return wall_decor.values().has(id)
+
+
+# Decorations as plain data for the save file.
+func get_decor() -> Dictionary:
+	var floor_pieces: Array = []
+	for anchor in decor:
+		floor_pieces.append([anchor.x, anchor.y, decor[anchor]["id"]])
+	var wall_pieces: Array = []
+	for wall in wall_decor:
+		var parts: PackedStringArray = wall.split(":")
+		wall_pieces.append([parts[0], int(parts[1]), wall_decor[wall]])
+	return {"floor": floor_pieces, "wall": wall_pieces}
+
+
+# Puts saved decorations back (after load_layout). Anything that no
+# longer fits is skipped.
+func load_decor(data) -> void:
+	if typeof(data) != TYPE_DICTIONARY:
+		return
+	for entry in data.get("floor", []):
+		if typeof(entry) != TYPE_ARRAY or entry.size() != 3 or not GameManager.DECOR.has(entry[2]):
+			continue
+		var anchor := Vector2i(int(entry[0]), int(entry[1]))
+		var fits: bool = true
+		for cell in _decor_cells(entry[2], anchor):
+			if not _in_bounds(cell) or _blocked(cell) or in_kitchen(cell) or cell == door_cell or cell == expo_front():
+				fits = false
+		if fits:
+			_place_decor(entry[2], anchor)
+	for entry in data.get("wall", []):
+		if typeof(entry) != TYPE_ARRAY or entry.size() != 3 or not GameManager.DECOR.has(entry[2]):
+			continue
+		var limit: int = cols if entry[0] == "top" else rows
+		if entry[0] in ["top", "left"] and int(entry[1]) < limit and not _wall_taken_by_building(entry[0], int(entry[1])):
+			wall_decor["%s:%d" % [entry[0], int(entry[1])]] = entry[2]
+	queue_redraw()
+
+
 # Moving the door is only allowed between days, with everyone inside,
 # so nobody is caught walking to the old doorway.
 func _try_move_door(cell: Vector2i) -> void:
@@ -1191,7 +1398,7 @@ func _try_move_door(cell: Vector2i) -> void:
 	if cell == door_cell:
 		build_message.emit("The door is already here.")
 		return
-	if furniture.has(cell):
+	if _blocked(cell):
 		build_message.emit("Clear that square first.")
 		return
 	if in_kitchen(cell) or cell == expo_front():
@@ -1211,6 +1418,8 @@ func _try_move_door(cell: Vector2i) -> void:
 		build_message.emit("Not enough gold!")
 		return
 	set_door(side, cell.x if side in ["top", "bottom"] else cell.y)
+	# Anything hanging where the new doorway is comes down (and can be hung again).
+	wall_decor.erase("%s:%d" % [side, door_index])
 	layout_changed.emit()
 	build_message.emit("Moved the door.")
 
@@ -1244,6 +1453,8 @@ func _layout_works(solid: Dictionary, door: Vector2i, k_pos: Vector2i, k_width: 
 				to_visit.append(next)
 
 	for piece in solid:
+		if solid[piece] == "decor":
+			continue   # decorations are only looked at, nobody needs to reach them
 		var usable: bool = false
 		for side in SIDES:
 			if reachable.has(piece + side):
@@ -1358,6 +1569,11 @@ func _draw() -> void:
 				draw_colored_polygon(tile, _c("floor_a") if even else _c("floor_b"))
 			draw_polyline(tile + PackedVector2Array([tile[0]]), _c("floor_line"), 1.0)
 
+	# Rugs lie on the floor, under everyone.
+	for anchor in decor:
+		if GameManager.DECOR[decor[anchor]["id"]].get("walk", false):
+			_draw_decor_art(self, decor[anchor]["id"], iso(Vector2(anchor) + Vector2(0.5, 0.5)))
+
 	# Doormat on the doorway square.
 	var mat: PackedVector2Array = _diamond(door_cell)
 	var middle: Vector2 = iso(Vector2(door_cell) + Vector2(0.5, 0.5))
@@ -1373,6 +1589,16 @@ func _draw() -> void:
 	for y in rows:
 		_draw_back_wall(iso(Vector2(0, y)), iso(Vector2(0, y + 1)), _c("plaster_left"), _c("panel_left"),
 				door_side == "left" and door_index == y, y % 3 == 1, GameManager.in_hall() and y % 3 == 2)
+
+	# Decorations hanging on the back walls. The art is drawn for the top
+	# wall; mirrored, it fits the left wall.
+	for wall in wall_decor:
+		var parts: PackedStringArray = wall.split(":")
+		var i: int = int(parts[1])
+		if parts[0] == "top":
+			_draw_decor_art(self, wall_decor[wall], iso(Vector2(i + 0.5, 0.5)))
+		else:
+			_draw_decor_art(self, wall_decor[wall], iso(Vector2(0.5, i + 0.5)), true)
 
 	# Build mode: outline every square, tint the doorway, and with the
 	# Door tool, show every edge square the door could move to.
@@ -1438,6 +1664,9 @@ func draw_prop(prop: FloorProp) -> void:
 	match prop.kind:
 		"table", "long_table": _draw_table(prop)
 		"chair": _draw_chair(prop)
+		"decor":
+			if decor.has(prop.cell):
+				_draw_decor_art(prop, decor[prop.cell]["id"], Vector2.ZERO)
 		"kitchen": _draw_hearth(prop)
 		"expo": _draw_expo(prop)
 		"wall": _draw_front_wall(prop)
@@ -1470,6 +1699,61 @@ func _draw_art(prop: FloorProp, art: Texture2D, frame: int = 0, mirror: bool = f
 	prop.draw_set_transform(Vector2(0, -prop.lift), 0.0, Vector2(-1, 1) if mirror else Vector2.ONE)
 	prop.draw_texture_rect_region(art, Rect2(-anchor * ART_SCALE, size * ART_SCALE), source)
 	prop.draw_set_transform(Vector2.ZERO)
+
+
+# Decorations (tools/sprites/make_decor.py and make_trophies.py): one
+# strip of frames each, 64 x 72 per frame; the 2 x 2 dragon is 112 x 128
+# with its footprint's middle at (56, 100).
+const DECOR_ART: Dictionary = {
+	"fern": preload("res://assets/sprites/decor/fern.png"),
+	"barrels": preload("res://assets/sprites/decor/barrels.png"),
+	"rug": preload("res://assets/sprites/decor/rug.png"),
+	"armour": preload("res://assets/sprites/decor/armour.png"),
+	"bookshelf": preload("res://assets/sprites/decor/bookshelf.png"),
+	"fireplace": preload("res://assets/sprites/decor/fireplace.png"),
+	"dragon": preload("res://assets/sprites/decor/dragon.png"),
+	"painting": preload("res://assets/sprites/decor/painting.png"),
+	"shield": preload("res://assets/sprites/decor/shield.png"),
+	"antlers": preload("res://assets/sprites/decor/antlers.png"),
+	"lantern": preload("res://assets/sprites/decor/lantern.png"),
+	"wreath": preload("res://assets/sprites/decor/wreath.png"),
+	"glowcap": preload("res://assets/sprites/decor/glowcap.png"),
+	"wings": preload("res://assets/sprites/decor/wings.png"),
+	"mirror": preload("res://assets/sprites/decor/mirror.png"),
+	"crown": preload("res://assets/sprites/decor/crown.png"),
+	"wyvern": preload("res://assets/sprites/decor/wyvern.png"),
+	"centaur": preload("res://assets/sprites/decor/centaur.png"),
+	"griffon": preload("res://assets/sprites/decor/griffon.png"),
+	"unicorn": preload("res://assets/sprites/decor/unicorn.png"),
+	"minotaur": preload("res://assets/sprites/decor/minotaur.png"),
+	"kraken": preload("res://assets/sprites/decor/kraken.png"),
+}
+const BIG_FRAME := Vector2(112, 128)
+const BIG_ANCHOR := Vector2(56, 100)
+
+
+# Draws decoration `id` on `canvas` with its square's middle at `at`.
+# Animated pieces step through their frames on their own.
+func _draw_decor_art(canvas: CanvasItem, id: String, at: Vector2, mirror: bool = false) -> void:
+	var info: Dictionary = GameManager.DECOR[id]
+	var big: bool = info.get("size", 1) == 2
+	var size: Vector2 = BIG_FRAME if big else ART_FRAME
+	var anchor: Vector2 = BIG_ANCHOR if big else ART_ANCHOR
+	var frame: int = (Time.get_ticks_msec() / 250) % info.get("frames", 1)
+	var source := Rect2(Vector2(size.x * frame, 0), size)
+	canvas.draw_set_transform(at, 0.0, Vector2(-1, 1) if mirror else Vector2.ONE)
+	canvas.draw_texture_rect_region(DECOR_ART[id], Rect2(-anchor * ART_SCALE, size * ART_SCALE), source)
+	canvas.draw_set_transform(Vector2.ZERO)
+
+
+# A picture of a decoration's first frame, for the Decor list: just the
+# part of the frame the piece is drawn in, so it shows up big enough.
+func decor_icon(id: String) -> AtlasTexture:
+	var big: bool = GameManager.DECOR[id].get("size", 1) == 2
+	var icon := AtlasTexture.new()
+	icon.atlas = DECOR_ART[id]
+	icon.region = Rect2(Vector2.ZERO, BIG_FRAME) if big else Rect2(10, 8, 44, 56)
+	return icon
 
 
 const TABLE_TOP: float = 26.0   # how high the tabletop is, in world pixels

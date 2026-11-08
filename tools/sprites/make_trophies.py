@@ -187,8 +187,20 @@ def scene(art):
     return img
 
 
+GAME_IDS = {"Wyvern head": "wyvern", "Centaur head": "centaur", "Griffon head": "griffon",
+            "Unicorn head": "unicorn", "Minotaur head": "minotaur", "Kraken tentacles": "kraken"}
+
+
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
+    out = os.path.join(os.path.dirname(os.path.dirname(here)), "assets", "sprites", "decor")
+    os.makedirs(out, exist_ok=True)
+    for name, make in TROPHIES:   # the game's frames, side by side
+        frames = [make(f) for f in range(FRAMES)]
+        sheet = Image.new("RGBA", (frames[0].width * FRAMES, frames[0].height), (0, 0, 0, 0))
+        for i, fr in enumerate(frames):
+            sheet.paste(fr, (i * fr.width, 0))
+        sheet.save(os.path.join(out, GAME_IDS[name] + ".png"))
     S = 2
     font = ImageFont.load_default(size=15)
     cw, ch = PW * S + 16, PH * S + 30

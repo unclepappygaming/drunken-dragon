@@ -92,6 +92,7 @@ func _ready() -> void:
 			grid.set_door(str(door[0]), int(door[1]))
 		# Saves from before the kitchen have no "kitchen": the grid finds one.
 		grid.load_layout(save.get("furniture", []), save.get("kitchen", null))
+		grid.load_decor(save.get("decor", {}))
 		# clampi keeps a number within limits, in case the file was edited.
 		_load_staff(save)
 		# Day 0 means they built or hired before ever opening.
@@ -317,7 +318,7 @@ func _on_customer_left(customer: Customer, _happy: bool) -> void:
 			GameManager.today_served += 1
 			if customer.is_noble:
 				GameManager.today_nobles_served += 1
-			GameManager.record_served(customer.order["id"], customer.is_noble)
+			GameManager.record_served(customer.order["id"], customer.is_noble, customer.guest_type)
 		"impatient":
 			GameManager.today_walkouts += 1
 		"no_dish":
@@ -342,6 +343,10 @@ func _announce_unlocks(ids: Array[String], speaker: Customer) -> void:
 				speaker.say("Try %s!" % recipe["name"])
 		else:
 			hud.show_message("Quest done: %s! New recipe: %s." % [unlock["title"], recipe["name"]], 5.0)
+	for id in GameManager.check_trophies():
+		var piece: Dictionary = GameManager.DECOR[id]
+		hud.show_message("Trophy earned: %s! Hang it from Build > Decor." % piece["name"], 5.0)
+		GameManager.today_news.append("Trophy earned: %s (%s)." % [piece["name"], piece["task"]])
 	var expansion_quest: String = GameManager.check_expansion_ready()
 	if expansion_quest != "":
 		hud.show_message("Quest done: %s! You can expand the tavern (Build > Expand)." % expansion_quest, 6.0)
@@ -429,6 +434,10 @@ func _on_skip_ahead() -> void:
 		while get_tree().get_nodes_in_group(role + "s").size() < 4:
 			_hire(StaffProfiles.random_profile(role))
 	GameManager.refund(maxi(0, GameManager.GRAND_HALL["cost"] + 2000 - GameManager.gold))
+	# Every wall decoration, so they can all be tried out.
+	for id in GameManager.DECOR:
+		if GameManager.DECOR[id]["where"] == "wall":
+			GameManager.stats["trophy:" + id] = 1
 	GameManager.recipes_changed.emit()
 	_update_staff_display()
 	_save_if_closed()
@@ -582,7 +591,7 @@ func _save_if_closed() -> void:
 	# Mid-day changes are saved at the end of the day instead.
 	if GameManager.is_open or _waiting_for_last_guests:
 		return
-	GameManager.save_game(grid.get_layout(), grid.get_door(), grid.get_kitchen(), _staff_profiles())
+	GameManager.save_game(grid.get_layout(), grid.get_door(), grid.get_kitchen(), _staff_profiles(), grid.get_decor())
 
 
 func _show_day_summary() -> void:

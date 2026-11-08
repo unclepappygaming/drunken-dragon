@@ -64,6 +64,8 @@ var _new_game_armed: bool = false   # true after the first tap
 var _move_armed: bool = false       # the same for moving to the Grand Hall
 var _gold_taps: Array[int] = []     # times of recent taps on the gold (msec)
 var _rotate_button: Button
+var _decor_panel: PanelContainer
+var _decor_list: VBoxContainer
 var _recipe_panel: PanelContainer
 var _recipe_header: Label
 var _recipe_list: VBoxContainer
@@ -99,6 +101,7 @@ func _ready() -> void:
 	_build_expand_panel()
 	_build_plan_panel()
 	_build_people_panel()
+	_build_decor_panel()
 
 	# CONNECTING SIGNALS: "when GameManager emits gold_changed, run my
 	# _on_gold_changed function". The signal passes along the new amount.
@@ -263,7 +266,13 @@ func _select_tool(type: String) -> void:
 				info["name"], TavernGrid.seats_at(type), info["cost"]])
 		"kitchen": _set_hint("Tap the kitchen's front row: Hearth (%dg)" % GameManager.FURNITURE["kitchen"]["cost"])
 		"kitchen_move": _set_hint("Tap where the kitchen's back-left corner should go")
-		"remove":  _set_hint("Tap furniture to sell it (half price)")
+		"remove":  _set_hint("Tap furniture to sell it (half price), or a wall piece to take it down")
+		"decor":
+			var piece: Dictionary = GameManager.DECOR[grid.decor_choice]
+			if piece["where"] == "wall":
+				_set_hint("Tap a stretch of back wall: %s" % piece["name"])
+			else:
+				_set_hint("Tap a square: %s (%dg)" % [piece["name"], piece["cost"]])
 		"door":    _set_hint("Tap a square along a wall to move the door (%dg)" % TavernGrid.DOOR_COST)
 
 
@@ -485,6 +494,10 @@ func _build_trays() -> void:
 	_rotate_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_rotate_button.pressed.connect(_on_rotate)
 	build_row.move_child(_rotate_button, 2)
+	var decor := _make_button("Decor", 21, build_row, 86)
+	decor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	decor.pressed.connect(_open_decor)
+	_tool_buttons["decor"] = decor
 	var expand := _make_button("Expand", 21, build_row, 86)
 	expand.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	expand.pressed.connect(_on_expand_tool)
@@ -873,6 +886,112 @@ func _refresh_people() -> void:
 			button.modulate = HIGHLIGHT
 			button.pressed.connect(_on_hire_pressed.bind(i))
 		row.add_child(button)
+
+
+# ---------------------------------------------------------------------
+# Decor: floor pieces to buy, and wall pieces earned by achievements.
+# ---------------------------------------------------------------------
+func _build_decor_panel() -> void:
+	_decor_panel = PanelContainer.new()
+	add_child(_decor_panel)
+	_decor_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_decor_panel.offset_left = 10
+	_decor_panel.offset_right = -10
+	_decor_panel.offset_top = TOP_HEIGHT + 5
+	_decor_panel.offset_bottom = -(BAR_HEIGHT + TRAY_HEIGHT * 2 + 5)   # above the Build tray
+	_decor_panel.visible = false
+	_solid(_decor_panel)
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 12)
+	_decor_panel.add_child(vbox)
+	var title := _make_label(28)
+	title.text = "Decorations"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(title)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vbox.add_child(scroll)
+	_decor_list = VBoxContainer.new()
+	_decor_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_decor_list.add_theme_constant_override("separation", 10)
+	scroll.add_child(_decor_list)
+	var close := _make_button("Close", 26, vbox, 76)
+	close.pressed.connect(func(): _decor_panel.visible = false)
+
+
+func _open_decor() -> void:
+	if grid == null:
+		return
+	for child in _decor_list.get_children():
+		child.queue_free()
+	_add_decor_heading("Floor: buy and place")
+	for id in GameManager.DECOR:
+		if GameManager.DECOR[id]["where"] == "floor":
+			_add_decor_row(id)
+	_add_decor_heading("Wall trophies: earned by achievements")
+	for id in GameManager.DECOR:
+		if GameManager.DECOR[id]["where"] == "wall":
+			_add_decor_row(id)
+	_decor_panel.visible = true
+
+
+func _add_decor_heading(text: String) -> void:
+	var label := _make_label(22)
+	label.text = text
+	label.modulate = Color(1.0, 0.85, 0.5)
+	_decor_list.add_child(label)
+
+
+func _add_decor_row(id: String) -> void:
+	var piece: Dictionary = GameManager.DECOR[id]
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	_decor_list.add_child(row)
+	var picture := TextureRect.new()
+	picture.texture = grid.decor_icon(id)
+	picture.custom_minimum_size = Vector2(72, 84)
+	picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	picture.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	row.add_child(picture)
+	var about := _make_label(20)
+	about.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	about.autowrap_mode = TextServer.AUTOWRAP_WORD
+	row.add_child(about)
+	var button := Button.new()
+	button.add_theme_font_size_override("font_size", 20)
+	button.custom_minimum_size = Vector2(120, 64)
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(button)
+	if piece["where"] == "floor":
+		var size_note: String = "  (2 x 2)" if piece.get("size", 1) == 2 else ("  (walk on it)" if piece.get("walk", false) else "")
+		about.text = "%s%s\n%dg" % [piece["name"], size_note, piece["cost"]]
+		if not GameManager.decor_available(id):
+			about.text += "  Needs %d fame" % piece.get("fame", 0)
+			button.text = "Locked"
+			button.disabled = true
+		else:
+			button.text = "Place"
+			button.disabled = GameManager.gold < piece["cost"]
+	else:
+		var have: int = mini(GameManager.stat(piece["stat"]), piece["goal"])
+		if GameManager.has_trophy(id):
+			about.text = "%s\nEarned: %s" % [piece["name"], piece["task"]]
+			button.text = "Move" if grid.is_hung(id) else "Hang"
+		else:
+			about.text = "%s\n%s (%d/%d)" % [piece["name"], piece["task"], have, piece["goal"]]
+			button.text = "Locked"
+			button.disabled = true
+			about.modulate = Color(0.7, 0.7, 0.7)
+			picture.modulate = Color(0.2, 0.2, 0.2)   # a silhouette until it's earned
+	button.pressed.connect(_choose_decor.bind(id))
+
+
+func _choose_decor(id: String) -> void:
+	grid.decor_choice = id
+	_decor_panel.visible = false
+	_select_tool("decor")
 
 
 func _build_people_panel() -> void:

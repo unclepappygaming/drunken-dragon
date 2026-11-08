@@ -84,6 +84,36 @@ The bottom bar has four buttons:
     unlocked by a quest (like "Serve 60 guests"), then bought with gold.
     The same card has **Widen Kitchen** (250g a square, up to 8 wide).
     Hearths cost 250g; selling anything gives half back.
+  - **Decor** opens the decorations list. They're just for looks.
+    - **Floor pieces** are bought and placed on a square: Potted Fern 60g,
+      Ale Barrels 90g, Rug 120g (people walk over it), Suit of Armour 250g,
+      Bookshelf 250g, Fireplace 400g (its fire flickers) and the Dragon
+      Statue 1500g, which covers 2 x 2 squares and needs Legendary rank.
+      Sell gives half back.
+    - **Wall trophies** are earned by achievements, never bought, and hang
+      on a stretch of back wall (not over windows, banners or the door).
+      Tap a hung piece with Sell to take it down; "Move" re-hangs it.
+
+      | Trophy | Achievement |
+      | --- | --- |
+      | Painting | Reach Local Haunt |
+      | Shield & Swords | Serve 25 Town Guards |
+      | Antlers | Serve 100 Roast Boars |
+      | Faerie Lantern (glows) | Open the tavern for 20 days |
+      | Moonflower Wreath | Serve 50 Honey Meads |
+      | Glowcap Shelf | Serve 100 Mushroom Stews |
+      | Gossamer Wings | Have 5 perfect days |
+      | Fae Mirror | Host 3 triumphant banquets |
+      | Faerie Crown | Learn every recipe |
+      | Wyvern Head (opens its jaws) | Serve 30 Wyvern Wings |
+      | Centaur Head (glowing eyes) | Serve 50 adventurers |
+      | Griffon Head (ruffles) | Reach Famed Hall |
+      | Unicorn Head (glinting horn) | Serve 25 nobles |
+      | Minotaur Head (snorts) | Serve 500 guests |
+      | Kraken Tentacles (sway) | Move to the Grand Hall |
+
+    Decorations stay behind when you move to the Grand Hall; earned
+    trophies come along and can be hung again.
 - **Staff** opens a tray: **Hire Cook**, **Hire Waiter** (three new
   applicants each day) and **Your Staff** (let someone go). Between days
   only. Hiring costs a signing fee of 4 days' wages up front, then wages
@@ -121,8 +151,8 @@ three Hearths and eight tables.
 - Marble floors, stone walls with crimson panelling, gold trim and banners.
 
 **Test shortcut:** tap the Gold counter 5 times quickly (between days) to
-jump to a Legendary, full-size tavern with every recipe, 4 cooks, 4
-waiters and enough gold to move. It's switched on by `TEST_SHORTCUT` in
+jump to a Legendary, full-size tavern with every recipe, every wall
+trophy, 4 cooks, 4 waiters and enough gold to move. It's switched on by `TEST_SHORTCUT` in
 `scripts/hud.gd`; turn that off before releasing the game.
 
 The game saves automatically between days. **New Game** on the day summary
@@ -194,6 +224,8 @@ The floor and walls are drawn in code; characters and furniture are pixel-art sp
    - ✅ Pixel-art furniture: plank trestle tables, brick stoves with a
      flickering fire, a serving hatch for the pass
    - ✅ Plates on tables, and waiters clear them after guests leave
+   - ✅ Decorations: seven floor pieces to buy and fifteen wall trophies
+     earned by achievements, some animated
    - ⬜ Sprites for the floor and walls
    - Sound effects and music (they start after the first tap, as browsers require)
 7. ⬜ **The Grand Hall, continued**
