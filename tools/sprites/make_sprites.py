@@ -541,6 +541,49 @@ HAIR_KEYS = {
 }
 
 
+def marks(color, front=(), side=()):
+    """A few single pixels of detail: (x, y) with y counted from the top
+    of the body ("b", y) or from the middle of the head ("h", y)."""
+    def layer(img, view, y0, y1, cy):
+        for x, ref, y in (front if view == "front" else side if view == "side" else ()):
+            px(img, x, (y0 if ref == "b" else cy) + y, color)
+    return layer
+
+
+# Guests get the same shading, plus a touch of detail each.
+GUEST_DETAILS = {
+    "farmer": [marks((90, 125, 185, 255), front=[(17, "b", 5), (18, "b", 5), (17, "b", 6), (18, "b", 6)]),   # a patch
+               marks((230, 200, 90, 255), front=[(20, "h", -6), (21, "h", -7)])],                              # wheat in the hat
+    "guard": [marks(GOLD_PX, front=[(15, "b", 3), (16, "b", 3), (15, "b", 4), (16, "b", 4), (14, "b", 4), (17, "b", 4)])],
+    "merchant": [marks(GOLD_PX, front=[(15, "b", 2), (16, "b", 3), (15, "b", 4)], side=[(18, "b", 2)])],      # a gold pendant
+    "regular": [marks((110, 70, 40, 255), front=[(18, "h", 4), (19, "h", 4), (20, "h", 3)], side=[(21, "h", 3), (22, "h", 2)])],   # a pipe
+    "knight": [marks(GOLD_PX, front=[(15, "b", 2), (16, "b", 2), (15, "b", 3), (16, "b", 3)])],
+    "mage": [marks((250, 240, 160, 255), front=[(12, "b", 4), (19, "b", 7), (14, "b", 9), (18, "b", 3)])],     # stars on the robe
+    "rogue": [marks((70, 50, 35, 255), front=[(12, "b", 1), (13, "b", 2), (14, "b", 3), (15, "b", 4), (16, "b", 5), (17, "b", 6)])],   # a strap
+    "lord": [marks(GOLD_PX, front=[(12, "b", 2), (13, "b", 3), (14, "b", 4), (15, "b", 4), (16, "b", 4), (17, "b", 4), (18, "b", 3), (19, "b", 2)])],   # chain of office
+    "lady": [marks((245, 245, 250, 255), front=[(13, "b", 1), (14, "b", 2), (16, "b", 2), (17, "b", 2), (18, "b", 1)])],   # pearls
+}
+
+
+def hair_colour(ch):
+    """The colour of a guest's hair layer (what the game recolours)."""
+    for layer in ch.get("head_layers", []):
+        cells = getattr(layer, "__closure__", None) or ()
+        for cell in cells:
+            v = cell.cell_contents
+            if isinstance(v, tuple) and len(v) == 4 and layer.__qualname__.startswith("hair"):
+                return v
+    return None
+
+
+def detailed_staff(name, ch):
+    return dict(ch, shade=True, hair_key=HAIR_KEYS[name], extras=DETAILS[name])
+
+
+def detailed_guest(name, ch):
+    return dict(ch, shade=True, hair_key=hair_colour(ch), extras=GUEST_DETAILS.get(name, []))
+
+
 def detail_options(path):
     """Each staff member three ways: as now, shaded, shaded with details;
     front, side and carrying, zoomed in."""
@@ -886,6 +929,7 @@ def export_sheets(out_dir):
     views = [("front", s) for s in range(3)] + [("side", s) for s in range(3)] + [("back", s) for s in range(3)]
     for name, ch in list(COOKS.items()) + list(WAITERS.items()):
         is_waiter = name in WAITERS
+        ch = detailed_staff(name, ch)
         out = Image.new("RGBA", (W * len(views), H * 2), (0, 0, 0, 0))
         carry = dict(ch)
         if is_waiter:
@@ -902,6 +946,7 @@ def export_guest_sheets(out_dir):
     """Same layout as the staff sheets; guests don't carry, so row 1 repeats row 0."""
     views = [("front", s) for s in range(3)] + [("side", s) for s in range(3)] + [("back", s) for s in range(3)]
     for name, ch in GUESTS.items():
+        ch = detailed_guest(name, ch)
         out = Image.new("RGBA", (W * len(views), H * 2), (0, 0, 0, 0))
         for row in range(2):
             for col, (view, step) in enumerate(views):
@@ -972,7 +1017,8 @@ if __name__ == "__main__":
     export_sheets(os.path.join(root, "assets", "sprites", "staff"))
     os.makedirs(os.path.join(root, "assets", "sprites", "guests"), exist_ok=True)
     export_guest_sheets(os.path.join(root, "assets", "sprites", "guests"))
-    sheet([("Cooks", COOKS), ("Waiters", WAITERS)], os.path.join(here, "staff_options.png"))
+    sheet([("Cooks", {k: detailed_staff(k, v) for k, v in COOKS.items()}),
+           ("Waiters", {k: detailed_staff(k, v) for k, v in WAITERS.items()})], os.path.join(here, "staff_options.png"))
     detail_options(os.path.join(here, "staff_detail_options.png"))
-    sheet([("Guests", {k.title(): v for k, v in GUESTS.items()})], os.path.join(here, "guest_options.png"))
+    sheet([("Guests", {k.title(): detailed_guest(k, v) for k, v in GUESTS.items()})], os.path.join(here, "guest_options.png"))
     print("wrote previews")
