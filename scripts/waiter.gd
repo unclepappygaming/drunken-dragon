@@ -19,7 +19,8 @@
 # the player lets them go.
 #
 # The same script runs the other front-of-house jobs (profile's role):
-#   host        greets: waits by the door (the bonus is in customer.gd)
+#   host        waits by the door and greets each guest coming in
+#               (IDLE -> GREETING -> IDLE); the bonus is in customer.gd
 #   dishwasher  only clears tables; with one on staff, waiters don't
 #   bartender   works a Bar: takes drink orders from the kitchen's queue,
 #               pours, and carries the drink out:
@@ -33,7 +34,7 @@
 class_name Waiter
 extends Walker
 
-enum State { IDLE, TO_GUEST, TAKING_ORDER, TO_PASS, CARRYING, TO_TABLE, CLEARING, RETURNING, TO_BAR, POURING, LEAVING }
+enum State { IDLE, TO_GUEST, TAKING_ORDER, TO_PASS, CARRYING, TO_TABLE, CLEARING, RETURNING, TO_BAR, POURING, GREETING, LEAVING }
 
 const WALK_SPEED: float = 220.0
 const ORDER_TAKE_TIME: float = 1.0
@@ -43,6 +44,7 @@ const LUCKY_CHANCE: float = 1.0 / 3.0
 const LUCKY_TIP: float = 0.5
 const TRAY_SIZE: float = 0.75   # dishes on the tray are drawn a bit smaller
 const POUR_TIME: float = 1.5
+const GREET_TIME: float = 1.2
 
 var state: State = State.IDLE
 
@@ -53,6 +55,7 @@ var _timer: float = 0.0
 var profile: Dictionary = {}
 var role: String = "waiter"                 # "waiter", "host", "dishwasher" or "bartender"
 var _bar: Vector2i = TavernGrid.NO_CELL     # a bartender's Bar
+var _bubble: String = ""                     # what we're saying (the host's welcome)
 
 
 func setup(tavern_grid: TavernGrid, start_pos: Vector2, who: Dictionary) -> void:
@@ -158,6 +161,12 @@ func _process(delta: float) -> void:
 					state = State.POURING
 					_timer = POUR_TIME
 
+		State.GREETING:
+			_timer -= delta
+			if _timer <= 0.0:
+				_bubble = ""
+				state = State.IDLE
+
 		State.POURING:
 			if not _guest_is(Customer.State.WAITING_FOR_FOOD):
 				_give_up()
@@ -187,22 +196,26 @@ func leave() -> void:
 func _find_task() -> void:
 	match role:
 		"host":
-			return   # waits by the door (see standby_cell)
+			_greet_someone()   # otherwise waits by the door (see standby_cell)
+			return
 		"bartender":
 			_find_bar_task()
 			return
 		"dishwasher":
 			_find_dirty_table()
 			return
-	# Finished food first.
-	if grid.claim_ready_plate(self):
+	# Finished food first. Each job goes to whichever free waiter is
+	# nearest, so the whole team shares the work.
+	if grid.has_ready_plate() and _nearest_free(grid.cell_center(grid.expo_front())) \
+			and grid.claim_ready_plate(self):
 		end_standby()
 		go_to_cell(grid.expo_front())
 		state = State.TO_PASS
 		return
 
-	var guest: Customer = GameManager.next_order_request()
-	if guest != null:
+	var waiting: Customer = GameManager.peek_order_request()
+	if waiting != null and _nearest_free(waiting.position):
+		var guest: Customer = GameManager.next_order_request()
 		end_standby()
 		_guest = guest
 		go_to_cell(grid.access_cell(guest.table_cell, position, self))
@@ -216,12 +229,40 @@ func _find_task() -> void:
 
 
 func _find_dirty_table() -> void:
+	var dirty: Vector2i = grid.peek_dirty_table()
+	if dirty == TavernGrid.NO_CELL or not _nearest_free(grid.cell_center(dirty)):
+		return
 	var table: Vector2i = grid.claim_dirty_table(self)
 	if table != TavernGrid.NO_CELL:
 		end_standby()
 		_table = table
 		go_to_cell(grid.access_cell(table, position, self))
 		state = State.TO_TABLE
+
+
+# Am I the nearest free colleague (same job, idle, not pausing) to `spot`?
+# If not, I leave the job for them.
+func _nearest_free(spot: Vector2) -> bool:
+	var mine: float = position.distance_to(spot)
+	for other in get_tree().get_nodes_in_group(role + "s"):
+		if other == self or other.state != State.IDLE or other._pause > 0.0 or other.current_cell() == TavernGrid.NO_CELL:
+			continue
+		var theirs: float = other.position.distance_to(spot)
+		if theirs < mine or (theirs == mine and other.get_instance_id() < get_instance_id()):
+			return false
+	return true
+
+
+# The host greets each guest on their way to a table.
+func _greet_someone() -> void:
+	for guest in get_tree().get_nodes_in_group("customers"):
+		if guest.state == Customer.State.WALKING_IN and not guest.greeted:
+			guest.greeted = true
+			face_toward(guest.position)
+			_bubble = ["Welcome!", "Right this way!", "Good evening!" if GameManager.minutes_since_open > 480 else "Good day!"].pick_random()
+			state = State.GREETING
+			_timer = GREET_TIME
+			return
 
 
 # A bartender goes to their Bar and pours whatever drink is waiting.
@@ -263,6 +304,12 @@ func _guest_is(guest_state: Customer.State) -> bool:
 func _draw() -> void:
 	var carrying: bool = state == State.CARRYING or state == State.RETURNING
 	draw_sprite(carrying)
+	if _bubble != "":
+		var font: Font = ThemeDB.fallback_font
+		var width: float = font.get_string_size(_bubble, HORIZONTAL_ALIGNMENT_LEFT, -1, 19).x
+		var at := Vector2(-width / 2.0, -75)
+		draw_string_outline(font, at, _bubble, HORIZONTAL_ALIGNMENT_CENTER, width, 19, 5, Color(0.12, 0.08, 0.05))
+		draw_string(font, at, _bubble, HORIZONTAL_ALIGNMENT_CENTER, width, 19, Color.WHITE)
 	if not carrying:
 		return
 	# The sheet only has an empty tray; put what we're carrying on it: the

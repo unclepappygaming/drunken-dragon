@@ -298,7 +298,13 @@ func _process(delta: float) -> void:
 			job["time_left"] -= delta * cook.cook_speed(job["customer"].order)
 			if job["time_left"] <= 0.0:
 				job["customer"].price_bonus += cook.portion_bonus()
-				cook.take_dish(job["customer"])   # they carry it to the pass
+				# A spare cook (one without a Hearth) runs the dish to the
+				# pass, so this cook can start the next one straight away.
+				var runner: Cook = _free_runner()
+				if runner != null:
+					runner.take_dish(job["customer"])
+				else:
+					cook.take_dish(job["customer"])   # they carry it to the pass
 				h["job"] = {}
 	queue_redraw()
 	# Hearths and the pass show progress and plates, so redraw them every frame.
@@ -469,6 +475,12 @@ func standby_cell(asker: Node) -> Vector2i:
 	var anchor: Vector2 = Vector2(expo_front())
 	if asker is Waiter and asker.role == "host":
 		anchor = Vector2(door_cell)   # the host waits by the door to greet guests
+	elif cook and not hearths.is_empty():
+		# Spare cooks wait by the Hearths, ready to run a dish to the pass.
+		anchor = Vector2.ZERO
+		for cell in hearths:
+			anchor += Vector2(cell)
+		anchor /= hearths.size()
 	var in_use: Dictionary = _cells_in_use(asker)
 	var choices: Array = []
 	for x in cols:
@@ -720,6 +732,30 @@ func expo_has_room() -> bool:
 # A cook sets a finished dish down on the pass.
 func put_on_expo(guest: Customer) -> void:
 	expo_plates.append({"guest": guest, "taker": null})
+
+
+# A cook with no Hearth and nothing in their hands, or null.
+func _free_runner() -> Cook:
+	for cook in get_tree().get_nodes_in_group("cooks"):
+		if cook.state == Cook.State.IDLE and cook.hearth_cell == NO_CELL and cook.current_cell() != NO_CELL:
+			return cook
+	return null
+
+
+# Is there a plate on the pass nobody is fetching yet?
+func has_ready_plate() -> bool:
+	for plate in expo_plates:
+		if _wants_food(plate["guest"]) and not is_instance_valid(plate["taker"]):
+			return true
+	return false
+
+
+# The first table a waiter could clear right now (without claiming it).
+func peek_dirty_table() -> Vector2i:
+	for cell in table_dishes:
+		if _dirty_count(cell) > 0 and table_owner.get(cell) == null and not is_instance_valid(_bussers.get(cell)):
+			return cell
+	return NO_CELL
 
 
 # A Waiter asks for a plate on the pass that nobody is fetching yet.

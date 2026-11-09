@@ -71,6 +71,7 @@ const BARD_CALM: float = 0.5         # nearby guests lose patience this much slo
 # character, so one guest's bubble never darkens the guest behind it.
 var _overlay: Node2D
 var _seat: Vector2i = TavernGrid.NO_CELL   # our chair
+var greeted: bool = false                  # the host has welcomed us
 
 
 # Called by main.gd right after the guest is created. We can't pass

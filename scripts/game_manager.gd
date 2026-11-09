@@ -586,6 +586,14 @@ func new_staff_uid() -> int:
 	return stat("staff_uid")
 
 
+# The next guest who wants to order, without taking them off the list.
+func peek_order_request() -> Customer:
+	for c in order_requests:
+		if is_instance_valid(c) and c.state == Customer.State.WAITING_FOR_WAITER:
+			return c
+	return null
+
+
 # A Waiter asks for the next guest who wants to order (or null).
 func next_order_request() -> Customer:
 	while not order_requests.is_empty():

@@ -44,7 +44,11 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
   the room. When a dish is done they carry it to the pass. The pass holds 3
   plates; if it's full, cooks wait.
 - **Waiters** take orders, collect dishes from the front of the pass (they
-  never enter the kitchen) and carry them to the table.
+  never enter the kitchen) and carry them to the table. Each job goes to
+  the nearest free waiter, so the team shares the work.
+- A cook without a Hearth of their own is a **runner**: they wait by the
+  Hearths and carry finished dishes to the pass, so the Hearth's cook can
+  start the next dish right away. A Hearth for each cook is still best.
 - **Every dish has its own look**: ale in a tankard, stew in a steaming
   bowl, a roast boar on the bone, wyvern wings, a flaming phoenix roast,
   the Dragonfire Feast on a gold platter... You see them on the pass, on

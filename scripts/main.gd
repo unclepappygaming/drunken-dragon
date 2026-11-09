@@ -511,6 +511,7 @@ func _on_skip_ahead() -> void:
 	for role in ["cook", "waiter"]:
 		while get_tree().get_nodes_in_group(role + "s").size() < 4:
 			_hire(StaffProfiles.random_profile(role))
+	_furnish_for_test()
 	GameManager.refund(maxi(0, GameManager.GRAND_HALL["cost"] + 2000 - GameManager.gold))
 	# Every wall decoration, so they can all be tried out.
 	for id in GameManager.DECOR:
@@ -520,6 +521,28 @@ func _on_skip_ahead() -> void:
 	_update_staff_display()
 	_save_if_closed()
 	hud.show_message("Test shortcut: Legendary! Build -> Expand to move.", 6.0)
+
+
+# Test shortcut: enough Hearths and tables for the staff it hires, so
+# nobody stands around with nothing to do. Free, and skips anything that
+# doesn't fit.
+func _furnish_for_test() -> void:
+	while grid.kitchen_width < 6:
+		var before: int = grid.kitchen_width
+		GameManager.refund(TavernGrid.KITCHEN_WIDEN_COST)
+		grid.try_widen_kitchen()
+		if grid.kitchen_width == before:
+			break
+	for x in range(grid.kitchen_pos.x, grid.kitchen_pos.x + grid.kitchen_width - 1):
+		var cell := Vector2i(x, grid.kitchen_pos.y + 1)
+		if grid.hearths.size() < get_tree().get_nodes_in_group("cooks").size() and not grid.furniture.has(cell):
+			grid._place(cell, "kitchen")
+	for spot in [[Vector2i(2, 8), Vector2i(1, 0), "long_table"], [Vector2i(6, 9), Vector2i(1, 0), "table"],
+			[Vector2i(9, 6), Vector2i(0, 1), "long_table"], [Vector2i(2, 11), Vector2i(1, 0), "table"],
+			[Vector2i(7, 12), Vector2i(1, 0), "table"], [Vector2i(10, 10), Vector2i(0, 1), "table"]]:
+		if grid._table_fits(spot[2], spot[0], spot[1]) and grid._layout_works_with_table(spot[2], spot[0], spot[1]):
+			grid._place_table(spot[2], spot[0], spot[1])
+	grid.layout_changed.emit()
 
 
 # The street around the building: country green, or city cobbles.
@@ -593,6 +616,9 @@ func _on_hire_requested(role: String, index: int) -> void:
 		GameManager.refund(fee)
 		return
 	_hire(profile)
+	if role == "cook" and get_tree().get_nodes_in_group("cooks").size() > grid.hearths.size():
+		hud.show_message("No free Hearth: they'll run dishes to the pass. Build a Hearth to let them cook.", 5.0)
+		return
 	var info: Dictionary = StaffProfiles.TYPES[profile["type"]]
 	hud.show_message("Hired %s the %s for %dg (then %dg/day)." % [profile["name"], info["title"], fee, info["wage"]])
 	_update_staff_display()

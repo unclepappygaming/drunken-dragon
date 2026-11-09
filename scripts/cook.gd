@@ -9,6 +9,10 @@
 #   IDLE -> TO_HEARTH -> AT_HEARTH -> TO_PASS -> AT_PASS -> TO_HEARTH ...
 #     ^                                 (their Hearth sold: back to IDLE)
 #
+# A cook with no Hearth of their own is a RUNNER: when another cook's
+# dish is done, they carry it to the pass (IDLE -> TO_PASS -> AT_PASS
+# -> IDLE), so the Hearth's cook can start the next dish at once.
+#
 # Cooks always face the camera (always_front), so food and faces stay
 # visible. LEAVING is used when the player lets them go.
 #
@@ -109,6 +113,7 @@ func is_at_hearth() -> bool:
 
 # Called by the grid when a dish is done: carry it to the pass.
 func take_dish(guest: Customer) -> void:
+	end_standby()
 	_dish = guest
 	go_to_cell(grid.expo_back())
 	state = State.TO_PASS
