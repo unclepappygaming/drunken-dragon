@@ -212,6 +212,23 @@ erases the save (it asks twice).
 To make a web version: **Project → Export → Web → Export Project** (you'll be
 asked to download export templates the first time).
 
+## Phone builds
+
+`export_presets.cfg` has three presets: Web, Android and iOS.
+
+- **Android:** in Godot, set Editor Settings > Export > Android: the
+  Android SDK folder, Java, and a debug keystore. Then Project > Export >
+  Android > Export Project. The result is an `.apk` you can install on a
+  phone with "install unknown apps" allowed. To publish on the Play Store,
+  make your own release keystore, fill in `keystore/release*` and export a
+  release build. Turning on Gradle builds gives you an `.aab` instead.
+- **iOS:** this needs a Mac with Xcode and an Apple developer account.
+  Put your Team ID in the preset (`application/app_store_team_id`) and
+  export. Godot writes an Xcode project; open `DrunkenDragon.xcodeproj`,
+  pick your team under Signing & Capabilities, and run it on your phone.
+- The gold-tap test shortcut never works in the phone apps; it's only
+  there for the web test build.
+
 ## Code tour
 
 The floor and walls are drawn in code; characters and furniture are pixel-art sprites made by the scripts in `tools/sprites/`:

@@ -32,7 +32,7 @@ signal widen_kitchen_requested
 signal move_requested   # move to the Grand Hall (after a second tap)
 # TEST SHORTCUT: tapping the gold 5 times quickly jumps ahead to a
 # Legendary, fully expanded tavern, ready to move to the Grand Hall.
-# Turn TEST_SHORTCUT off before releasing the game.
+# It's on in the web test build only; phone apps never have it.
 signal skip_ahead_requested
 const TEST_SHORTCUT: bool = true
 
@@ -433,7 +433,7 @@ func _build_top_bar() -> void:
 	vbox.add_child(row)
 	_gold_label = _make_label(34)
 	_gold_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	if TEST_SHORTCUT:
+	if TEST_SHORTCUT and not OS.has_feature("mobile"):
 		_gold_label.mouse_filter = Control.MOUSE_FILTER_STOP
 		_gold_label.gui_input.connect(_on_gold_input)
 	row.add_child(_gold_label)

@@ -103,6 +103,12 @@ def shade(c, f):
 # A character is a dict of colors and options; draw() builds one frame.
 # ---------------------------------------------------------------------
 def draw(ch, view="front", step=0):
+    """view: "front", "side", "back", or the three-quarter views
+    "quarter" (turned a little to our right, walking down-right on screen)
+    and "quarter_back" (walking away, up-right). Layers only know
+    front/side/back, so they're drawn as the nearest of those."""
+    quarter = view in ("quarter", "quarter_back")
+    base = {"quarter": "front", "quarter_back": "back"}.get(view, view)
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     small = ch.get("small", False)          # dwarves / halflings are shorter
     top = 4 if small else 0                 # shift everything down a bit
@@ -116,7 +122,14 @@ def draw(ch, view="front", step=0):
     lift_r = 1 if step == 2 else 0
     leg = ch["legs"]
     shoe = ch["shoes"]
-    if view == "side":
+    if quarter:
+        # Staggered: the far leg is a shade darker and tucked in.
+        fwd = {0: 0, 1: 1, 2: -1}[step]
+        rect(img, 13, 25 - lift_l, 15, 28 - lift_l, shade(leg, 0.82))
+        rect(img, 13, 28 - lift_l, 16, 29 - lift_l, shade(shoe, 0.82))
+        rect(img, 17 + fwd, 25 - lift_r, 19 + fwd, 28 - lift_r, leg)
+        rect(img, 17 + fwd, 28 - lift_r, 20 + fwd, 29 - lift_r, shoe)
+    elif view == "side":
         fwd = {0: 0, 1: 2, 2: -2}[step]
         rect(img, 15 - fwd, 25, 17 - fwd, 28, shade(leg, 0.8))
         rect(img, 15 + fwd, 25, 17 + fwd, 28, leg)
@@ -130,7 +143,16 @@ def draw(ch, view="front", step=0):
 
     # Body
     body = ch["body"]
-    if view == "side":
+    if quarter:
+        # Narrower on the far side, with the near side in shade.
+        rect(img, 11, body_y0 + 1, 21, body_y1, body)
+        rect(img, 12, body_y0, 20, body_y0, body)
+        rect(img, 20, body_y0 + 1, 21, body_y1, shade(body, 0.84))
+        if ch.get("dress"):
+            rect(img, 10, 21, 22, 26, body)
+            rect(img, 20, 21, 22, 26, shade(body, 0.84))
+            rect(img, 10, 26, 22, 26, shade(body, 0.75))
+    elif view == "side":
         rect(img, 12, body_y0, 19, body_y1, body)
         rect(img, 12, body_y0, 12, body_y1, shade(body, 0.85))
     else:
@@ -141,11 +163,18 @@ def draw(ch, view="front", step=0):
             rect(img, 9, 26, 22, 26, shade(body, 0.8))
     # Apron / vest / jacket details (front only for most)
     for layer in ch.get("layers", []):
-        layer(img, view, body_y0, body_y1)
+        layer(img, base, body_y0, body_y1)
 
     # Arms (behind props). Side view shows one arm swinging.
     sleeve = ch.get("sleeve", body)
-    if view == "side":
+    if quarter:
+        # The far arm mostly hidden behind the body; the near one swings.
+        swing = {0: 0, 1: 1, 2: -1}[step]
+        rect(img, 10, body_y0 + 2, 10, body_y0 + 6, shade(sleeve, 0.8))
+        rect(img, 10, body_y0 + 7, 10, body_y0 + 7, ch.get("hand", SKIN))
+        rect(img, 22, body_y0 + 1 + swing, 23, body_y0 + 6 + swing, sleeve)
+        rect(img, 22, body_y0 + 7 + swing, 23, body_y0 + 8 + swing, ch.get("hand", SKIN))
+    elif view == "side":
         swing = {0: 0, 1: 1, 2: -1}[step]
         rect(img, 15 + swing, body_y0 + 1, 17 + swing, body_y0 + 6, sleeve)
         rect(img, 15 + swing, body_y0 + 7, 17 + swing, body_y0 + 8, ch.get("hand", SKIN))
@@ -163,19 +192,31 @@ def draw(ch, view="front", step=0):
         px(img, 18, head_cy + 1, EYE); px(img, 18, head_cy + 2, EYE)
         px(img, 12, head_cy + 3, BLUSH); px(img, 19, head_cy + 3, BLUSH)
         px(img, 15, head_cy + 4, SKIN_DARK); px(img, 16, head_cy + 4, SKIN_DARK)
+    elif view == "quarter":
+        # Both eyes, shifted towards where they're looking; the nose
+        # just shows on the edge of the face.
+        px(img, 15, head_cy + 1, EYE); px(img, 15, head_cy + 2, EYE)
+        px(img, 19, head_cy + 1, EYE); px(img, 19, head_cy + 2, EYE)
+        px(img, 14, head_cy + 3, BLUSH); px(img, 20, head_cy + 3, BLUSH)
+        px(img, 22, head_cy + 2, SKIN)
+        px(img, 18, head_cy + 4, SKIN_DARK)
     elif view == "side":
         px(img, 19, head_cy + 1, EYE); px(img, 19, head_cy + 2, EYE)
         px(img, 21, head_cy + 2, SKIN)       # little nose
         px(img, 18, head_cy + 3, BLUSH)
     for layer in ch.get("head_layers", []):
-        layer(img, view, head_cy)
+        layer(img, base, head_cy)
+    if view == "quarter_back":
+        # Walking away: a glimpse of cheek and ear on the near side.
+        rect(img, 21, head_cy + 1, 22, head_cy + 3, SKIN)
+        px(img, 21, head_cy + 4, SKIN_DARK)
 
     # Props held in front (tray, spoon...)
     for layer in ch.get("props", []):
-        layer(img, view, body_y0, step)
+        layer(img, base, body_y0, step)
     # Extra details (towels, notepads, belts...) drawn over everything
     for layer in ch.get("extras", []):
-        layer(img, view, body_y0, body_y1, head_cy)
+        layer(img, base, body_y0, body_y1, head_cy)
 
     if ch.get("shade"):
         shade_pass(img, [SKIN, SKIN_DARK, BLUSH, EYE, ch.get("hair_key")])
@@ -582,6 +623,33 @@ def detailed_staff(name, ch):
 
 def detailed_guest(name, ch):
     return dict(ch, shade=True, hair_key=hair_colour(ch), extras=GUEST_DETAILS.get(name, []))
+
+
+def quarter_options(path):
+    """Each character as now (front, side, back) beside the new
+    three-quarter views (quarter, quarter mirrored, quarter from behind),
+    zoomed in, and walking across a floor at game size."""
+    from PIL import ImageFont
+    font = ImageFont.load_default(size=15)
+    cast = [(n.split(". ")[1], detailed_staff(n, c)) for n, c in list(COOKS.items())[:2] + list(WAITERS.items())[:2]]
+    cast += [(n.title(), detailed_guest(n, c)) for n, c in GUESTS.items() if n in ("farmer", "guard", "knight", "lady")]
+    Z, gap = 3, 4
+    cw = (W * Z + gap) * 3
+    sheet_img = Image.new("RGBA", (140 + cw * 2 + 40, 34 + len(cast) * (H * Z + 10)), (60, 54, 48, 255))
+    d = ImageDraw.Draw(sheet_img)
+    d.text((150, 8), "As now: front, side, back", fill=(250, 230, 180), font=font)
+    d.text((150 + cw + 30, 8), "Three-quarter: toward you (both ways), walking away", fill=(250, 230, 180), font=font)
+    for r, (name, ch) in enumerate(cast):
+        y0 = 34 + r * (H * Z + 10)
+        d.text((8, y0 + H * Z // 2 - 8), name, fill=(240, 240, 235), font=font)
+        now = [draw(ch, "front", 0), draw(ch, "side", 1), draw(ch, "back", 0)]
+        q = draw(ch, "quarter", 1)
+        new = [q, q.transpose(Image.FLIP_LEFT_RIGHT), draw(ch, "quarter_back", 1)]
+        for i, pic in enumerate(now):
+            sheet_img.alpha_composite(pic.resize((W * Z, H * Z), Image.NEAREST), (150 + i * (W * Z + gap), y0))
+        for i, pic in enumerate(new):
+            sheet_img.alpha_composite(pic.resize((W * Z, H * Z), Image.NEAREST), (150 + cw + 30 + i * (W * Z + gap), y0))
+    sheet_img.save(path)
 
 
 def detail_options(path):
@@ -1020,5 +1088,6 @@ if __name__ == "__main__":
     sheet([("Cooks", {k: detailed_staff(k, v) for k, v in COOKS.items()}),
            ("Waiters", {k: detailed_staff(k, v) for k, v in WAITERS.items()})], os.path.join(here, "staff_options.png"))
     detail_options(os.path.join(here, "staff_detail_options.png"))
+    quarter_options(os.path.join(here, "quarter_options.png"))
     sheet([("Guests", {k.title(): detailed_guest(k, v) for k, v in GUESTS.items()})], os.path.join(here, "guest_options.png"))
     print("wrote previews")
