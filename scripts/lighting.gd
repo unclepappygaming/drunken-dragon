@@ -1,15 +1,15 @@
 # =====================================================================
 # lighting.gd  —  day turning to night. Created by main.gd.
 #
-# While the tavern is open, the light changes with the clock: plain
-# daylight in the morning, warm late-afternoon sun, an orange dusk during
-# the dinner rush, and a blue night before closing. Between days it's
-# daylight again, so building is easy to see.
+# While the tavern is open, the light OUTSIDE changes with the clock:
+# plain daylight in the morning, warm late-afternoon sun, an orange dusk
+# during the dinner rush, and a blue night before closing. Inside, the
+# tavern stays lit (its windows show the night sky, and candles come out
+# on the tables). Between days it's daylight again.
 #
-# Darkening is a CanvasModulate (it tints the whole room). Lights (the
-# windows, lamp posts, candles on the tables) are soft glows drawn on a
-# layer above it that follows the camera, so they shine through the
-# dark. Their strength follows how dark it is.
+# Only the scenery is tinted (and the empty space beyond it). Its lights
+# (lamp posts, house windows) are soft glows drawn on a layer above that
+# follows the camera, so they shine through the dark.
 # =====================================================================
 class_name Lighting
 extends Node
@@ -30,15 +30,12 @@ var grid: TavernGrid
 var scenery: Scenery
 var night: float = 0.0           # 0 = full day, 1 = full night (lights at full strength)
 
-var _tint: CanvasModulate
 var _glows: Node2D
 
 
 func setup(main: Node, tavern_grid: TavernGrid, around: Scenery) -> void:
 	grid = tavern_grid
 	scenery = around
-	_tint = CanvasModulate.new()
-	main.add_child(_tint)
 	var layer := CanvasLayer.new()
 	layer.layer = 1                    # above the room, below the HUD (layer 2)
 	layer.follow_viewport_enabled = true   # moves and zooms with the camera
@@ -55,8 +52,10 @@ func _process(_delta: float) -> void:
 	var hour: float = GameManager.OPEN_HOUR + GameManager.minutes_since_open / 60.0
 	if not GameManager.is_open and not _closing():
 		hour = GameManager.OPEN_HOUR   # between days: daylight, to build by
-	_tint.color = tint_at(hour)
-	night = clampf((hour - LIGHT_FROM) / (LIGHT_FULL - LIGHT_FROM), 0.0, 1.0)
+	var tint: Color = tint_at(hour)
+	scenery.modulate = tint
+	RenderingServer.set_default_clear_color(scenery.base_color() * tint)
+	night = night_at(hour)
 	_glows.queue_redraw()
 
 
@@ -64,6 +63,11 @@ func _process(_delta: float) -> void:
 # the day summary shows.
 func _closing() -> bool:
 	return grid.get_tree().get_nodes_in_group("customers").size() > 0
+
+
+# 0 in the day, rising to 1 at full night.
+static func night_at(hour: float) -> float:
+	return clampf((hour - LIGHT_FROM) / (LIGHT_FULL - LIGHT_FROM), 0.0, 1.0)
 
 
 static func tint_at(hour: float) -> Color:
@@ -80,7 +84,7 @@ func _draw_glows() -> void:
 	if night <= 0.01:
 		return
 	var flicker: float = 0.92 + 0.08 * sin(Time.get_ticks_msec() / 130.0)
-	for light in grid.light_spots() + scenery.light_spots():
+	for light in scenery.light_spots():
 		var at: Vector2 = light[0]
 		var radius: float = light[1]
 		var color: Color = light[2]

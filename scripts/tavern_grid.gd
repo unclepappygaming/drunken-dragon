@@ -1655,7 +1655,11 @@ func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, d
 		var a: Vector2 = from + along * 0.22 + up * 0.5
 		var b: Vector2 = from + along * 0.78 + up * 0.5
 		var win_up: Vector2 = up * 0.36
-		draw_colored_polygon(PackedVector2Array([a, b, b + win_up, a + win_up]), Color8(175, 214, 236))
+		# The sky outside: daylight blue, deepening to night blue (the tavern
+		# itself stays lit; see lighting.gd).
+		var night: float = Lighting.night_at(GameManager.OPEN_HOUR + GameManager.minutes_since_open / 60.0) \
+				if GameManager.is_open or _candles_lit() else 0.0
+		draw_colored_polygon(PackedVector2Array([a, b, b + win_up, a + win_up]), Color8(175, 214, 236).lerp(Color8(40, 50, 95), night))
 		draw_polyline(PackedVector2Array([a, b, b + win_up, a + win_up, a]), _c("trim"), 2.0)
 		draw_line((a + b) / 2.0, (a + b) / 2.0 + win_up, _c("trim"), 2.0)
 	elif banner:
@@ -1668,27 +1672,6 @@ func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, d
 		draw_colored_polygon(cloth, Color8(150, 30, 40))
 		draw_polyline(cloth + PackedVector2Array([a]), _c("trim"), 2.0)
 		draw_circle((a + b) / 2.0 + drop * 0.4, 4.0, _c("trim"))   # a gold emblem
-
-
-# Where light comes from after dark (see lighting.gd), in Main's space:
-# [position, radius, colour] for each window, Hearth, table candle and fireplace.
-func light_spots() -> Array:
-	var spots: Array = []
-	var up := Vector2(0, -WALL_HEIGHT * 0.68)
-	for x in cols:
-		if x % 3 == 1 and not (door_side == "top" and door_index == x):
-			spots.append([position + (iso(Vector2(x, 0)) + iso(Vector2(x + 1, 0))) / 2.0 + up, 44.0, Color(1.0, 0.8, 0.5)])
-	for y in rows:
-		if y % 3 == 1 and not (door_side == "left" and door_index == y):
-			spots.append([position + (iso(Vector2(0, y)) + iso(Vector2(0, y + 1))) / 2.0 + up, 44.0, Color(1.0, 0.8, 0.5)])
-	for cell in hearths:
-		spots.append([cell_center(cell) + Vector2(0, -24), 40.0, Color(1.0, 0.5, 0.2)])
-	for anchor in tables:
-		spots.append([_props[anchor].position + Vector2(0, -TABLE_TOP - 10), 38.0, Color(1.0, 0.75, 0.4)])
-	for anchor in decor:
-		if decor[anchor]["id"] == "fireplace":
-			spots.append([_props[anchor].position + Vector2(0, -20), 56.0, Color(1.0, 0.55, 0.25)])
-	return spots
 
 
 # Candles come out on the tables in the evening.
