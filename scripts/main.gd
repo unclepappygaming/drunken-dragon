@@ -44,6 +44,9 @@ var _waiting_for_last_guests: bool = false
 var _line: Array[Customer] = []
 # On a banquet day: when each noble arrives, in game minutes after opening.
 var _noble_arrivals: Array[float] = []
+# Special events: when the food critic and each fae guest arrive (game minutes).
+var _critic_at: float = -1.0
+var _fae_arrivals: Array[float] = []
 # How many guests are using each table (a party shares one). The table
 # is freed when the last of them leaves.
 var _table_guests: Dictionary = {}
@@ -134,6 +137,14 @@ func _process(_delta: float) -> void:
 			and GameManager.minutes_since_open >= _noble_arrivals[0]:
 		_noble_arrivals.pop_front()
 		_noble_arrives()
+	if GameManager.is_open and _critic_at >= 0.0 and GameManager.minutes_since_open >= _critic_at:
+		_critic_at = -1.0
+		hud.show_message("The food critic has arrived! Look sharp!", 4.0)
+		_vip_arrives(_spawn_customer("critic"))
+	if GameManager.is_open and not _fae_arrivals.is_empty() \
+			and GameManager.minutes_since_open >= _fae_arrivals[0]:
+		_fae_arrivals.pop_front()
+		_fae_arrives()
 
 	# After closing, wait until every guest has walked out the door and
 	# the waiters have cleared the tables (if there are any waiters).
@@ -155,9 +166,26 @@ func _on_day_start_requested(banquet: bool) -> void:
 			return
 	GameManager.open_shop(banquet)
 	_regular_came_today = false
-	hud.set_day_button("Open", false)
+	# While open, the day button shows what kind of day it is.
+	var kind: String = "Open"
+	if banquet:
+		kind = "Banquet\nDay"
+	elif GameManager.today_event != "":
+		kind = GameManager.EVENTS[GameManager.today_event]["name"].replace(" ", "\n")
+	hud.set_day_button(kind, false)
 	spawn_timer.start(2.0)   # first guest arrives 2 seconds after opening
 	_noble_arrivals.clear()
+	_critic_at = -1.0
+	_fae_arrivals.clear()
+	match GameManager.today_event:
+		"critic":
+			_critic_at = randf_range(120.0, 420.0)   # sometime between 11:00 and 16:00
+		"fae_night":
+			var start: float = (GameManager.FAE_FROM_HOUR - GameManager.OPEN_HOUR) * 60.0
+			for i in GameManager.FAE_GUESTS:
+				_fae_arrivals.append(start + i * 20.0)   # 18:00 to 19:40
+	if GameManager.today_event != "":
+		hud.show_message(GameManager.EVENTS[GameManager.today_event]["text"], 6.0)
 	if banquet:
 		# Spread the party evenly between BANQUET_START and BANQUET_END.
 		var party: int = GameManager.banquet_party_size()
@@ -283,14 +311,28 @@ func _noble_arrives() -> void:
 	if GameManager.today_banquet_nobles == 0:
 		hud.show_message("The nobles are arriving!", 3.0)
 	GameManager.today_banquet_nobles += 1
-	var noble: Customer = _spawn_customer("noble")
+	_vip_arrives(_spawn_customer("noble"))
+
+
+# Nobles and the food critic don't queue: they get the next free table,
+# or go to the front of the line if there isn't one.
+func _vip_arrives(guest: Customer) -> void:
 	var cell: Vector2i = grid.find_free_table()
 	if cell != TavernGrid.NO_CELL:
-		_seat(noble, cell)
+		_seat(guest, cell)
 	else:
-		_line.insert(0, noble)
-		noble.wait_in_line(_line_spot(0))
+		_line.insert(0, guest)
+		guest.wait_in_line(_line_spot(0))
 		_seat_from_line()   # moves everyone else back a place
+
+
+# On a Fae Night, fae folk drift in from dusk. Like nobles they go to the
+# front of the line, so every one of them can be served before closing.
+func _fae_arrives() -> void:
+	GameManager.today_fae += 1
+	if GameManager.today_fae == 1:
+		hud.show_message("The fae have come! Delight them all for a reward.", 4.0)
+	_vip_arrives(_spawn_customer("fae"))
 
 
 # The line runs along the outside wall, starting beside the door.
@@ -341,8 +383,28 @@ func _on_customer_left(customer: Customer, _happy: bool) -> void:
 			GameManager.today_turned_away += 1
 		# "closed": sent home at closing time, it doesn't count.
 
+	if customer.guest_type == "critic":
+		_critic_verdict(customer)
+	if customer.guest_type == "fae" and customer.leave_reason == "served":
+		GameManager.today_fae_happy += 1
+
 	_announce_unlocks(GameManager.check_unlocks(), customer)
 	_seat_from_line()
+
+
+# The food critic's review, as they leave: glowing if served well with
+# time to spare, fair if served late, scathing if they left unhappy.
+func _critic_verdict(critic: Customer) -> void:
+	var verdict: String = "scathing"
+	if critic.leave_reason == "served":
+		verdict = "glowing" if critic._patience_at_serve > critic._patience_max / 2.0 else "fair"
+	var change: int = GameManager.CRITIC_FAME[verdict]
+	GameManager.change_fame(change)
+	var line: String = {"glowing": "The critic's review is glowing!", "fair": "The critic's review is fair.",
+			"scathing": "The critic's review is scathing!"}[verdict]
+	hud.show_message("%s (%+d fame)" % [line, change], 5.0)
+	GameManager.today_news.append("%s (%+d fame)" % [line, change])
+	_announce_fame()
 
 
 # Tells the player about recipes they just earned. A regular who shares
@@ -632,11 +694,20 @@ func _show_day_summary() -> void:
 		GameManager.change_fame(change)
 		var title: String = {"triumph": "A triumphant banquet!", "good": "A pleasant banquet.", "poor": "The nobles were not impressed."}[result]
 		banquet_line = "%s %d of %d nobles left happy (%+d fame)." % [title, happy, guests, change]
+	# A Fae Night is won by sending every fae guest home happy.
+	if GameManager.today_event == "fae_night" and GameManager.today_fae > 0:
+		if GameManager.today_fae_happy == GameManager.today_fae:
+			GameManager.add_stat("fae_nights")
+			GameManager.change_fame(GameManager.FAE_NIGHT_FAME)
+			GameManager.today_news.append("The fae were delighted! (+%d fame)" % GameManager.FAE_NIGHT_FAME)
+		else:
+			GameManager.today_news.append("%d of %d fae left happy. They hoped for more." % [GameManager.today_fae_happy, GameManager.today_fae])
 	_announce_unlocks(GameManager.check_unlocks(), null)
 	_save_if_closed()
 
-	var text := "Day %d complete!\n\nIncome: %dg\nIngredients: -%dg\nWages: -%dg\nProfit: %dg\n\nGuests served: %d (nobles: %d)\nWalk-outs: %d\nTurned away: %d" % [
+	var text := "Day %d complete!%s\n\nIncome: %dg\nIngredients: -%dg\nWages: -%dg\nProfit: %dg\n\nGuests served: %d (nobles: %d)\nWalk-outs: %d\nTurned away: %d" % [
 		GameManager.day,
+		"" if GameManager.today_event == "" else "\n(" + GameManager.EVENTS[GameManager.today_event]["name"] + ")",
 		GameManager.today_income,
 		ingredients,
 		wages,

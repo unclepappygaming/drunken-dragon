@@ -10,8 +10,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.dont_write_bytecode = True
+from PIL import Image  # noqa: E402
 from make_sprites import (  # noqa: E402
-    W, H, SKIN, GOLD, WOOD, STEEL, px, rect, ellipse, shade, sheet, hair, beard, beret, mustache,
+    W, H, SKIN, GOLD, WOOD, STEEL, px, rect, ellipse, shade, sheet, hair, beard, beret, mustache, draw, tray,
     wizard_hat, magic_staff, belt, buttons, apron, vest, bandana, neckerchief, marks, towel,
     rolled_sleeves, watch_chain, hair_colour,
 )
@@ -270,8 +271,32 @@ def shaded(group):
     return {name: dict(ch, shade=True, hair_key=hair_colour(ch)) for name, ch in group.items()}
 
 
+# Ids the game uses for each sheet.
+GAME_IDS = {"Bard": "bard", "Elf": "elf", "Dwarf Miner": "miner", "Wizard": "wizard", "Food Critic": "critic",
+            "Pixie": "pixie", "Dryad": "dryad", "Satyr": "satyr",
+            "Host": "host", "Dishwasher": "dishwasher", "Bartender": "bartender"}
+CARRIERS = ("Dishwasher", "Bartender")   # they carry things on a tray (sheet row 1)
+
+
+def export(out_dir, group):
+    """Sheets in the game's layout: 9 frames (front, side, back; idle and
+    two steps each), row 0 normal and row 1 carrying."""
+    views = [("front", s) for s in range(3)] + [("side", s) for s in range(3)] + [("back", s) for s in range(3)]
+    for name, ch in shaded(group).items():
+        carry = dict(ch, props=[tray(mug=False, plate=True)]) if name in CARRIERS else ch
+        out = Image.new("RGBA", (W * len(views), H * 2), (0, 0, 0, 0))
+        for row, c in enumerate([ch, carry]):
+            for col, (view, step) in enumerate(views):
+                out.alpha_composite(draw(c, view, step), (col * W, row * H))
+        out.save(os.path.join(out_dir, GAME_IDS[name] + ".png"))
+
+
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(os.path.dirname(here))
+    export(os.path.join(root, "assets", "sprites", "guests"), NEW_GUESTS)
+    export(os.path.join(root, "assets", "sprites", "guests"), FAE_GUESTS)
+    export(os.path.join(root, "assets", "sprites", "staff"), NEW_STAFF)
     sheet([("New guests", shaded(NEW_GUESTS)), ("Fae Night guests", shaded(FAE_GUESTS)),
            ("New staff", shaded(NEW_STAFF))], os.path.join(here, "new_characters_options.png"))
     print("wrote new_characters_options.png")

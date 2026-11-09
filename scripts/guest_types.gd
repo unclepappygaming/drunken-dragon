@@ -10,6 +10,13 @@
 #   Adventurers a party of 2-3 sharing one table; impatient as a group,
 #               tip 25%
 #   Noble       only comes to Noble Banquets (see GameManager)
+#   Bard        plays while seated: guests nearby lose patience half as fast
+#   Elf         only drinks Elven Wine (only comes when it's on the menu),
+#               and pays double
+#   Dwarf Miner orders a second dish after the first
+#   Wizard      impatient, but tips well
+#   Food Critic only on a Food Critic day (see GameManager.EVENTS)
+#   Pixie, Dryad, Satyr  the fae, who visit on a Fae Night
 #
 # Which dish each type orders is decided by GameManager.pick_order().
 # =====================================================================
@@ -46,6 +53,33 @@ const TYPES: Dictionary = {
 		"title": "Noble", "patience": 1.0, "speed": 0.9, "pay": 0.0,
 		"looks": {"lord": Color8(95, 65, 40), "lady": Color8(190, 140, 70)},
 	},
+	"bard": {
+		"title": "Bard", "patience": 1.2, "speed": 1.0, "pay": 0.1,
+		"looks": {"bard": Color8(200, 140, 70)},
+	},
+	"elf": {
+		"title": "Elf", "patience": 1.0, "speed": 1.05, "pay": 1.0,
+		"looks": {"elf": Color8(235, 225, 170)},
+		"keep_hair": true,
+	},
+	"miner": {
+		"title": "Dwarf Miner", "patience": 1.0, "speed": 0.85, "pay": 0.0,
+		"looks": {"miner": Color8(150, 110, 70)},   # the beard
+	},
+	"wizard": {
+		"title": "Wizard", "patience": 0.6, "speed": 0.9, "pay": 0.4,
+		"looks": {"wizard": Color8(215, 215, 220)},
+		"keep_hair": true,   # always white
+	},
+	"critic": {
+		"title": "Food Critic", "patience": 0.8, "speed": 1.0, "pay": 0.0,
+		"looks": {"critic": Color8(80, 60, 50)},
+	},
+	"fae": {
+		"title": "Fae", "patience": 1.0, "speed": 1.1, "pay": 0.3,
+		"looks": {"pixie": Color8(240, 170, 200), "dryad": Color8(90, 150, 70), "satyr": Color8(110, 70, 40)},
+		"keep_hair": true,
+	},
 }
 
 # How often each type walks in, out of the total, and the fame needed
@@ -59,6 +93,10 @@ const ARRIVALS: Array = [
 	{"type": "merchant", "weight": 15, "fame": 0},
 	{"type": "regular", "weight": 8, "fame": 0},
 	{"type": "adventurer", "weight": 12, "fame": 10},
+	{"type": "bard", "weight": 6, "fame": 15},
+	{"type": "miner", "weight": 6, "fame": 20},
+	{"type": "elf", "weight": 5, "fame": 40},
+	{"type": "wizard", "weight": 5, "fame": 55},
 ]
 
 # Who comes as a pair, and how often (weights).
@@ -87,6 +125,14 @@ const SHEETS: Dictionary = {
 	"rogue": preload("res://assets/sprites/guests/rogue.png"),
 	"lord": preload("res://assets/sprites/guests/lord.png"),
 	"lady": preload("res://assets/sprites/guests/lady.png"),
+	"bard": preload("res://assets/sprites/guests/bard.png"),
+	"elf": preload("res://assets/sprites/guests/elf.png"),
+	"miner": preload("res://assets/sprites/guests/miner.png"),
+	"wizard": preload("res://assets/sprites/guests/wizard.png"),
+	"critic": preload("res://assets/sprites/guests/critic.png"),
+	"pixie": preload("res://assets/sprites/guests/pixie.png"),
+	"dryad": preload("res://assets/sprites/guests/dryad.png"),
+	"satyr": preload("res://assets/sprites/guests/satyr.png"),
 }
 
 
@@ -94,7 +140,8 @@ const SHEETS: Dictionary = {
 # Regular has already been in today.
 static func pick_arrival(fame: int, regular_allowed: bool) -> String:
 	var choices: Array = ARRIVALS.filter(func(a): return fame >= a["fame"] \
-			and (regular_allowed or a["type"] != "regular"))
+			and (regular_allowed or a["type"] != "regular") \
+			and (a["type"] != "elf" or GameManager.menu.has("wine")))   # elves only come for the wine
 	var total: int = 0
 	for a in choices:
 		total += a["weight"]

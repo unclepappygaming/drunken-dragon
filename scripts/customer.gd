@@ -64,6 +64,9 @@ var _timer: float = 0.0
 var _bubble: String = ""             # text shown above their head
 var _patience_scale: float = 1.0     # from the guest type
 var _patience_at_serve: float = 0.0  # for the Town Guard's quick-service tip
+var _second_helping: bool = false    # a Dwarf Miner already ordered their second dish
+const BARD_REACH: int = 3            # squares around a playing bard
+const BARD_CALM: float = 0.5         # nearby guests lose patience this much slower
 # Speech bubble and patience bar live on their own layer above every
 # character, so one guest's bubble never darkens the guest behind it.
 var _overlay: Node2D
@@ -109,6 +112,8 @@ func take_table(cell: Vector2i, seat: Vector2i = TavernGrid.NO_CELL) -> void:
 	state = State.WALKING_IN
 	_bubble = ""
 	patience = MAX_PATIENCE * _patience_scale
+	if GameManager.today_event == "rain":
+		patience *= GameManager.RAIN_PATIENCE   # in no hurry to go back out in the rain
 	_patience_max = patience
 	# Sit on a free square beside the table, not on top of it.
 	go_to_cell(seat if seat != TavernGrid.NO_CELL else grid.access_cell(cell, position, self))
@@ -146,7 +151,39 @@ func add_tip(share: float, text: String) -> void:
 	_bubble = text
 
 
+# A miner's second dish: back to calling for a waiter, with fresh patience.
+func _order_again() -> void:
+	var next: Dictionary = GameManager.pick_order(guest_type)
+	if next.is_empty():
+		_start_leaving("served")
+		return
+	order = next
+	patience = _patience_max
+	_bubble = "Another one!"
+	GameManager.order_requests.append(self)
+	state = State.WAITING_FOR_WAITER
+
+
+func _seated() -> bool:
+	return state in [State.DECIDING, State.WAITING_FOR_WAITER, State.WAITING_FOR_FOOD, State.EATING]
+
+
+# A bard at their table plays for the room: guests nearby lose patience
+# more slowly.
+func _play_music(delta: float) -> void:
+	if fmod(Time.get_ticks_msec() / 1000.0, 6.0) < delta * 1.01 and state != State.DECIDING:
+		_bubble = ["La la la~", "Hey nonny!", "Fa la la!"].pick_random()
+	var here: Vector2i = current_cell()
+	for other in get_tree().get_nodes_in_group("customers"):
+		if other != self and other._seated():
+			var gap: Vector2i = other.current_cell() - here
+			if absi(gap.x) <= BARD_REACH and absi(gap.y) <= BARD_REACH:
+				other.calm(delta * BARD_CALM)
+
+
 func _process(delta: float) -> void:
+	if guest_type == "bard" and _seated() and _path.is_empty():
+		_play_music(delta)
 	match state:
 		State.IN_LINE:
 			_walk(delta)   # to our spot in the line
@@ -191,6 +228,8 @@ func _process(delta: float) -> void:
 					share += GameManager.NOBLE_TIP   # nobles tip well
 				if GameManager.in_hall():
 					share += GameManager.HALL_PRICE_BONUS   # city prices
+				if GameManager.today_event == "festival":
+					share += GameManager.FESTIVAL_TIP
 				# A guard served quickly is grateful.
 				if guest_type == "guard" and _patience_at_serve > _patience_max / 2.0:
 					share += GuestTypes.GUARD_TIP
@@ -198,6 +237,11 @@ func _process(delta: float) -> void:
 				GameManager.earn(price)
 				grid.finish_dish(table_cell, _seat)   # leaves an empty plate behind
 				_bubble = "+%dg" % price
+				# A dwarf miner is always still hungry: one more dish.
+				if guest_type == "miner" and not _second_helping:
+					_second_helping = true
+					_order_again()
+					return
 				_start_leaving("served")
 
 		State.LEAVING:

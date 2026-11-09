@@ -32,6 +32,11 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
   | Adventurers | From 10 fame: a party of 2-3 sharing one table. Tip 25%, but if one storms off they all leave |
   | Pairs | Two farmers, merchants or guards who share a table, sitting across from each other. They wait in line together |
   | Lord / Lady | Only at Noble Banquets |
+  | Bard | From 15 fame. Plays while seated: guests within 3 squares lose patience half as fast |
+  | Dwarf Miner | From 20 fame. Always orders a second dish after the first |
+  | Elf | From 40 fame, and only while Elven Wine is on the menu. Drinks only that, and pays double |
+  | Wizard | From 55 fame. Impatient (60%), but tips 40% |
+  | Food Critic, Fae | Only on their special event days |
 - **The kitchen** is a zone 2 squares deep (grey stone floor). Hearths go
   on its front row; the **pass** (expo counter) is at the right end.
 - **Cooks** walk straight along the kitchen aisle (never out through the
@@ -65,6 +70,18 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
   the dinner rush and a blue night before closing, when the lamp posts
   and house windows glow. Inside stays lit: the windows show the night
   sky and candles come out on the tables.
+- **Special events**: from day 3, 4 in 10 ordinary days bring one (shown
+  on the day button while you're open):
+  - **Festival Day**: twice the guests and 25% better tips. Festival
+    crowds who can't get in don't count against the review.
+  - **Rainy Day**: rain outside, 30% fewer guests, but 30% more patient.
+  - **Food Critic** (from 10 fame): a critic arrives between 11:00 and
+    16:00 and goes to the front of the line. Served with time to spare:
+    a glowing review (+3 fame); served late: fair (+1); walked out:
+    scathing (-3).
+  - **Fae Night** (from 25 fame, rare): six fae (pixies, dryads, satyrs)
+    arrive from 18:00, going to the front of the line. Send them all home
+    happy for +2 fame and the Gossamer Wings trophy.
 - **Rush hours**: guests come 1.7x as often at lunch (12:00-14:00) and 2x
   at dinner (18:00-20:00); mornings before 11:00 are quiet. The clock turns
   orange during a rush. Plan your staff for the rush, not the quiet hours.
@@ -112,7 +129,7 @@ The bottom bar has four buttons:
       | Faerie Lantern (glows) | Open the tavern for 20 days |
       | Moonflower Wreath | Serve 50 Honey Meads |
       | Glowcap Shelf | Serve 100 Mushroom Stews |
-      | Gossamer Wings | Have 5 perfect days |
+      | Gossamer Wings | Delight the fae on a Fae Night |
       | Fae Mirror | Host 3 triumphant banquets |
       | Faerie Crown | Learn every recipe |
       | Wyvern Head (opens its jaws) | Serve 30 Wyvern Wings |

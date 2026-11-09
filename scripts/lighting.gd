@@ -53,6 +53,8 @@ func _process(_delta: float) -> void:
 	if not GameManager.is_open and not _closing():
 		hour = GameManager.OPEN_HOUR   # between days: daylight, to build by
 	var tint: Color = tint_at(hour)
+	if GameManager.today_event == "rain" and GameManager.is_open:
+		tint *= Color(0.78, 0.8, 0.88)   # a grey, overcast sky
 	scenery.modulate = tint
 	RenderingServer.set_default_clear_color(scenery.base_color() * tint)
 	night = night_at(hour)

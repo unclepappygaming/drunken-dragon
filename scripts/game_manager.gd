@@ -76,7 +76,7 @@ const DECOR: Dictionary = {
 	"lantern":   {"name": "Faerie Lantern", "where": "wall", "stat": "days", "goal": 20, "task": "Open the tavern for 20 days", "frames": 4},
 	"wreath":    {"name": "Moonflower Wreath", "where": "wall", "stat": "dish:mead", "goal": 50, "task": "Serve 50 Honey Meads"},
 	"glowcap":   {"name": "Glowcap Shelf", "where": "wall", "stat": "dish:stew", "goal": 100, "task": "Serve 100 Mushroom Stews"},
-	"wings":     {"name": "Gossamer Wings", "where": "wall", "stat": "perfect_days", "goal": 5, "task": "Have 5 perfect days"},
+	"wings":     {"name": "Gossamer Wings", "where": "wall", "stat": "fae_nights", "goal": 1, "task": "Delight the fae on a Fae Night"},
 	"mirror":    {"name": "Fae Mirror", "where": "wall", "stat": "triumphs", "goal": 3, "task": "Host 3 triumphant banquets"},
 	"crown":     {"name": "Faerie Crown", "where": "wall", "stat": "recipes_learned", "goal": 6, "task": "Learn every recipe"},
 	"wyvern":    {"name": "Wyvern Head", "where": "wall", "stat": "dish:wings", "goal": 30, "task": "Serve 30 Wyvern Wings", "frames": 4},
@@ -147,6 +147,31 @@ const RUSHES: Array = [
 ]
 const QUIET_UNTIL: int = 11
 const QUIET_BUSY: float = 0.7
+
+# SPECIAL EVENTS: from day 3, each ordinary (non-banquet) day has
+# EVENT_CHANCE of one, picked by weight among those your fame allows.
+#   festival   guests come twice as often and tip 25% more
+#   rain       30% fewer guests, but 30% more patient; rain outside
+#   critic     a food critic visits: serve them well and quickly for fame
+#   fae_night  from dusk, fae guests arrive; delight them all for a trophy
+const EVENT_CHANCE: float = 0.4
+const EVENTS: Dictionary = {
+	"festival": {"name": "Festival Day", "weight": 12, "fame": 0,
+		"text": "Festival Day! Twice the guests, and everyone tips 25% more."},
+	"rain": {"name": "Rainy Day", "weight": 12, "fame": 0,
+		"text": "A rainy day: fewer guests, but they're in no hurry to leave."},
+	"critic": {"name": "Food Critic", "weight": 10, "fame": 10,
+		"text": "A food critic is in town! Serve them well and quickly."},
+	"fae_night": {"name": "Fae Night", "weight": 6, "fame": 25,
+		"text": "The fae are abroad tonight! From dusk, fae folk will visit."},
+}
+const FESTIVAL_TIP: float = 0.25
+const RAIN_BUSY: float = 0.7
+const RAIN_PATIENCE: float = 1.3
+const CRITIC_FAME: Dictionary = {"glowing": 3, "fair": 1, "scathing": -3}
+const FAE_FROM_HOUR: int = 18       # the fae arrive from dusk
+const FAE_GUESTS: int = 6           # how many come
+const FAE_NIGHT_FAME: int = 2       # for delighting every one of them
 
 # ---------------------------------------------------------------------
 # FAME
@@ -268,6 +293,10 @@ var today_disappointed: int = 0   # left because nothing on the menu suited them
 var today_unlocked: Array[String] = []   # recipes earned today
 var today_news: Array[String] = []       # other news for the day summary
 var banquet_today: bool = false
+var today_event: String = ""             # "" or a key of EVENTS
+var force_event: String = ""             # for testing: the next day's event
+var today_fae: int = 0                   # fae guests who came tonight
+var today_fae_happy: int = 0             # ...and left happy
 var today_banquet_nobles: int = 0       # nobles who came to today's banquet
 
 # Customers waiting for a Waiter to come and take their order.
@@ -326,7 +355,31 @@ func open_shop(banquet: bool = false) -> void:
 	today_disappointed = 0
 	today_unlocked.clear()
 	today_news.clear()
+	today_fae = 0
+	today_fae_happy = 0
+	today_event = _roll_event(banquet)
 	shop_opened.emit(day)
+
+
+# Today's special event, or "" (never on the first two days or a banquet day).
+func _roll_event(banquet: bool) -> String:
+	if force_event != "":
+		var forced: String = force_event
+		force_event = ""
+		return forced
+	if banquet or day < 3 or randf() >= EVENT_CHANCE:
+		return ""
+	var total: int = 0
+	for id in EVENTS:
+		if fame >= EVENTS[id]["fame"]:
+			total += EVENTS[id]["weight"]
+	var roll: int = randi() % total
+	for id in EVENTS:
+		if fame >= EVENTS[id]["fame"]:
+			roll -= EVENTS[id]["weight"]
+			if roll < 0:
+				return id
+	return ""
 
 
 # Returns true and deducts gold if the player can afford it.
@@ -738,10 +791,16 @@ func pick_order(guest_type: String) -> Dictionary:
 				if tier == 2: choices.append(id)
 			"regular":
 				if id == regular_favorite(): choices.append(id)
+			"elf":
+				if id == "wine": choices.append(id)
+			"fae":
+				if tier < 3 or id == "wine": choices.append(id)
 			_:
 				if tier < 3: choices.append(id)
 	if guest_type == "guard" and choices.has("ale"):
 		choices = ["ale"]
+	if guest_type == "fae" and choices.has("mead"):
+		choices.append_array(["mead", "mead"])   # the fae love honey mead
 	if choices.is_empty():
 		return {}
 	var pick: String = choices.pick_random()
@@ -814,12 +873,16 @@ func current_rush() -> Dictionary:
 
 # How busy it is right now: 1 is normal, 2 means guests come twice as often.
 func busyness() -> float:
+	var busy: float = 1.0
 	var rush: Dictionary = current_rush()
 	if not rush.is_empty():
-		return rush["busy"]
-	if OPEN_HOUR + minutes_since_open / 60.0 < QUIET_UNTIL:
-		return QUIET_BUSY
-	return 1.0
+		busy = rush["busy"]
+	elif OPEN_HOUR + minutes_since_open / 60.0 < QUIET_UNTIL:
+		busy = QUIET_BUSY
+	match today_event:
+		"festival": busy *= 2.0
+		"rain": busy *= RAIN_BUSY
+	return busy
 
 
 # More fame = guests arrive more often (6.5 seconds at 0 fame, down to
@@ -841,6 +904,8 @@ func get_spawn_interval() -> float:
 # counts against it.
 func daily_review() -> Dictionary:
 	var unhappy: int = today_walkouts + today_disappointed + today_turned_away
+	if today_event == "festival":
+		unhappy -= today_turned_away   # festival crowds just move on to the next stall
 	var total: int = today_served + unhappy
 	if total == 0:
 		return {"happy": 0.0, "fame": 0, "name": "No"}

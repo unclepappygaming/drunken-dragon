@@ -355,6 +355,19 @@ func _draw_overlay() -> void:
 		_overlay.draw_set_transform(at, 0.0, Vector2(-1, 1) if heading.x < 0 else Vector2.ONE)
 		_overlay.draw_texture_rect_region(w["sheet"], Rect2(Vector2(-frame.x, 18 - frame.y * 2), frame * 2), source)
 	_overlay.draw_set_transform(Vector2.ZERO)
+	# Rain on a rainy day, falling outside only (the tavern is drawn over it).
+	if GameManager.today_event == "rain" and GameManager.is_open:
+		var now_r: float = Time.get_ticks_msec() / 1000.0
+		var top_left: Vector2 = grid.iso(Vector2(-MARGIN, grid.rows + MARGIN))
+		var bottom_right: Vector2 = grid.iso(Vector2(grid.cols + MARGIN, -MARGIN)) + Vector2(0, (grid.cols + grid.rows + 2 * MARGIN) * 24.0)
+		var span: Vector2 = bottom_right - Vector2(top_left.x, grid.iso(Vector2(-MARGIN, -MARGIN)).y)
+		var origin := Vector2(top_left.x, grid.iso(Vector2(-MARGIN, -MARGIN)).y)
+		for i in 700:
+			var h: int = hash(i)
+			var x: float = origin.x + float(h % 10007) / 10007.0 * span.x
+			var y: float = origin.y + fposmod(float((h >> 8) % 9973) / 9973.0 * span.y + now_r * 900.0, span.y)
+			_overlay.draw_line(Vector2(x, y), Vector2(x - 6, y + 26), Color(0.85, 0.9, 1.0, 0.85), 2.0)
+
 	# Fireflies blink on and off.
 	var now: float = Time.get_ticks_msec() / 1000.0
 	for light in _lights:
