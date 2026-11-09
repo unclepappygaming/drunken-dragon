@@ -60,6 +60,10 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 - Fame earns **ranks**: Unknown, Local Haunt (10), Town Favorite (25), Talk
   of the Realm (55), Famed Hall (90), Legendary (140). More fame also brings
   guests faster, so keep building to keep the reviews good.
+- **Day to night**: while you're open the light changes with the clock,
+  from morning daylight to warm afternoon sun, an orange dusk at the
+  dinner rush and a blue night before closing. After dark the windows,
+  lamp posts, stoves, fireplaces and candles on the tables glow.
 - **Rush hours**: guests come 1.7x as often at lunch (12:00-14:00) and 2x
   at dinner (18:00-20:00); mornings before 11:00 are quiet. The clock turns
   orange during a rush. Plan your staff for the rush, not the quiet hours.
@@ -187,6 +191,7 @@ The floor and walls are drawn in code; characters and furniture are pixel-art sp
 | `scripts/customer.gd` | One guest's state machine |
 | `scripts/cook.gd` / `waiter.gd` | Staff behavior |
 | `scripts/scenery.gd` | The world around the tavern: a meadow, a busy medieval city (the Grand Hall's) or a fae forest |
+| `scripts/lighting.gd` | Day turning to night, and the glow of lights after dark |
 | `scripts/hud.gd` | All the on-screen UI, built in code |
 | `scripts/tavern_camera.gd` | Drag, pinch and wheel camera; turns taps into build clicks |
 | `scripts/staff_profiles.gd` | Staff types, traits, wages, names and looks |

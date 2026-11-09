@@ -258,6 +258,19 @@ func _taken(cell: Vector2i) -> bool:
 	return false
 
 
+# Where light comes from after dark (see lighting.gd), in Main's space:
+# lamp posts, and the lit windows of houses.
+func light_spots() -> Array:
+	var spots: Array = []
+	for item in _items:
+		var middle: Vector2 = position + grid.iso(Vector2(item[1]) + Vector2(item[3], item[3]) * 0.5)
+		if item[0] == "lamp":
+			spots.append([middle + Vector2(0, -96), 60.0, Color(1.0, 0.85, 0.55)])
+		elif item[0] in HOUSES:
+			spots.append([middle + Vector2(10, -50), 46.0, Color(1.0, 0.75, 0.4)])
+	return spots
+
+
 # ---------------------------------------------------------------------
 # Drawing
 # ---------------------------------------------------------------------

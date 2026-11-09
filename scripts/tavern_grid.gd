@@ -1670,6 +1670,33 @@ func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, d
 		draw_circle((a + b) / 2.0 + drop * 0.4, 4.0, _c("trim"))   # a gold emblem
 
 
+# Where light comes from after dark (see lighting.gd), in Main's space:
+# [position, radius, colour] for each window, Hearth, table candle and fireplace.
+func light_spots() -> Array:
+	var spots: Array = []
+	var up := Vector2(0, -WALL_HEIGHT * 0.68)
+	for x in cols:
+		if x % 3 == 1 and not (door_side == "top" and door_index == x):
+			spots.append([position + (iso(Vector2(x, 0)) + iso(Vector2(x + 1, 0))) / 2.0 + up, 44.0, Color(1.0, 0.8, 0.5)])
+	for y in rows:
+		if y % 3 == 1 and not (door_side == "left" and door_index == y):
+			spots.append([position + (iso(Vector2(0, y)) + iso(Vector2(0, y + 1))) / 2.0 + up, 44.0, Color(1.0, 0.8, 0.5)])
+	for cell in hearths:
+		spots.append([cell_center(cell) + Vector2(0, -24), 40.0, Color(1.0, 0.5, 0.2)])
+	for anchor in tables:
+		spots.append([_props[anchor].position + Vector2(0, -TABLE_TOP - 10), 38.0, Color(1.0, 0.75, 0.4)])
+	for anchor in decor:
+		if decor[anchor]["id"] == "fireplace":
+			spots.append([_props[anchor].position + Vector2(0, -20), 56.0, Color(1.0, 0.55, 0.25)])
+	return spots
+
+
+# Candles come out on the tables in the evening.
+func _candles_lit() -> bool:
+	return GameManager.OPEN_HOUR + GameManager.minutes_since_open / 60.0 >= Lighting.LIGHT_FROM \
+			and (GameManager.is_open or not get_tree().get_nodes_in_group("customers").is_empty())
+
+
 # Draws one FloorProp, in the prop's own space (its position is 0, 0).
 func draw_prop(prop: FloorProp) -> void:
 	if prop.kind == "kitchen" and not hearths.has(prop.cell):
@@ -1781,6 +1808,10 @@ func _draw_table(prop: FloorProp) -> void:
 		_draw_art(prop, LONG_TABLE_ART, 0, along_y, LONG_FRAME, LONG_ANCHOR)
 	else:
 		_draw_art(prop, TABLE_ART, 0, along_y)
+	if _candles_lit():   # a candle in the middle of the table
+		var middle := Vector2(0, -TABLE_TOP - 2)
+		prop.draw_rect(Rect2(middle + Vector2(-2, -9), Vector2(4, 9)), Color8(240, 230, 200))
+		prop.draw_rect(Rect2(middle + Vector2(-1, -13), Vector2(2, 4)), Color8(255, 200, 80))
 	# The table stays bare until food arrives: each guest's dish sits in
 	# front of their chair. Empty plates stay until a Waiter clears them.
 	var plates: Dictionary = table_dishes.get(prop.cell, {})

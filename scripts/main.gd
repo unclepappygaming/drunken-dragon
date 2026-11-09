@@ -110,6 +110,11 @@ func _ready() -> void:
 	move_child(scenery, 0)
 	scenery.set_style(Scenery.style_for_location())
 	grid.layout_changed.connect(scenery.refresh)
+	# Day turning to night while the tavern is open.
+	hud.layer = 2   # above the lights' layer
+	var lighting := Lighting.new()
+	add_child(lighting)
+	lighting.setup(self, grid, scenery)
 	RenderingServer.set_default_clear_color(scenery.base_color())
 	_update_staff_display()
 	_fit_camera()
