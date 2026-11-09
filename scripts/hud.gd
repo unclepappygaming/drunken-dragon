@@ -63,7 +63,12 @@ var _new_game_button: Button
 var _new_game_armed: bool = false   # true after the first tap
 var _move_armed: bool = false       # the same for moving to the Grand Hall
 var _gold_taps: Array[int] = []     # times of recent taps on the gold (msec)
-var _rotate_button: Button
+# The pop-up over a tapped piece in Build mode: Move, Turn, Sell.
+var _piece_popup: PanelContainer
+var _piece_title: Label
+var _turn_button: Button
+var _sell_button: Button
+var _piece_info: Dictionary = {}
 var _decor_panel: PanelContainer
 var _decor_list: VBoxContainer
 var _recipe_panel: PanelContainer
@@ -102,6 +107,7 @@ func _ready() -> void:
 	_build_plan_panel()
 	_build_people_panel()
 	_build_decor_panel()
+	_build_piece_popup()
 
 	# CONNECTING SIGNALS: "when GameManager emits gold_changed, run my
 	# _on_gold_changed function". The signal passes along the new amount.
@@ -249,7 +255,7 @@ func _set_tray(tray: String) -> void:
 	if tray != "build":
 		_select_tool("")
 	if tray == "build":
-		_set_hint("Pick something to build, then tap a square.")
+		_select_tool("select")
 	elif tray == "staff":
 		_set_hint("Hire and let staff go between days.")
 	else:
@@ -257,6 +263,11 @@ func _set_tray(tray: String) -> void:
 
 
 func _select_tool(type: String) -> void:
+	# In the Build tray with no tool picked, taps select what's placed.
+	if type == "" and _open_tray == "build":
+		type = "select"
+	if grid != null and type != "move":
+		grid.clear_selection()
 	build_selected.emit(type)
 	for tool in _tool_buttons:
 		_tool_buttons[tool].modulate = HIGHLIGHT if tool == type else Color.WHITE
@@ -269,26 +280,90 @@ func _select_tool(type: String) -> void:
 		"bar": _set_hint("Tap a square: Bar (%dg). The bartender stands behind it." % GameManager.FURNITURE["bar"]["cost"])
 		"private": _set_hint("Grand Hall: tap squares for the private room (%dg each); tap again to undo" % TavernGrid.PRIVATE_COST)
 		"kitchen_move": _set_hint("Tap where the kitchen's back-left corner should go")
+		"select":  _set_hint("Tap a piece to move, turn or sell it, or pick something to build.")
 		"remove":  _set_hint("Tap furniture to sell it (half price), or a wall piece to take it down")
 		"decor":
 			var piece: Dictionary = GameManager.DECOR[grid.decor_choice]
 			if piece["where"] == "wall":
 				_set_hint("Tap a stretch of back wall: %s" % piece["name"])
 			else:
-				_set_hint("Tap a square: %s (%dg). Rotate turns it." % [piece["name"], piece["cost"]])
+				_set_hint("Tap a square: %s (%dg). Tap it after to turn it." % [piece["name"], piece["cost"]])
 		"door":    _set_hint("Tap a square along a wall to move the door (%dg)" % TavernGrid.DOOR_COST)
 
 
-# Turns new tables and floor decorations the other way.
-func _on_rotate() -> void:
-	if grid == null:
+# ---------------------------------------------------------------------
+# The Move / Turn / Sell pop-up over a tapped piece
+# ---------------------------------------------------------------------
+func _build_piece_popup() -> void:
+	_piece_popup = PanelContainer.new()
+	_piece_popup.visible = false
+	add_child(_piece_popup)
+	_solid(_piece_popup, Color(0.2, 0.15, 0.1, 0.96))
+	var box := VBoxContainer.new()
+	_piece_popup.add_child(box)
+	_piece_title = _make_label(22)
+	_piece_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(_piece_title)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	box.add_child(row)
+	var move := _make_button("Move", 22, row, 64)
+	move.custom_minimum_size.x = 110
+	move.pressed.connect(_on_piece_move)
+	_turn_button = _make_button("Turn", 22, row, 64)
+	_turn_button.custom_minimum_size.x = 110
+	_turn_button.pressed.connect(_on_piece_turn)
+	_sell_button = _make_button("Sell", 22, row, 64)
+	_sell_button.custom_minimum_size.x = 130
+	_sell_button.pressed.connect(_on_piece_sell)
+	var close := _make_button("X", 22, row, 64)
+	close.custom_minimum_size.x = 64
+	close.pressed.connect(func(): grid.clear_selection())
+
+
+# Called by the grid when a piece is tapped ({} = nothing selected).
+func show_piece_popup(info: Dictionary) -> void:
+	_piece_info = info
+	if info.is_empty():
+		_piece_popup.visible = false
+		if grid != null and grid.build_type == "select":
+			_set_hint("Tap a piece to move, turn or sell it, or pick something to build.")
 		return
-	grid.build_dir = Vector2i(grid.build_dir.y, grid.build_dir.x)
-	_rotate_button.text = "Rotate\n\\" if grid.build_dir == Vector2i(1, 0) else "Rotate\n/"
-	if grid.build_type == "decor" and GameManager.DECOR[grid.decor_choice]["where"] == "floor":
-		_select_tool("decor")   # refreshes the hint
-	elif not grid.build_type in ["table", "long_table"]:
-		_select_tool("table")
+	_piece_title.text = info["name"]
+	_turn_button.disabled = not info["turn"]
+	_sell_button.text = "Take down" if info["what"] == "wall" else "Sell +%dg" % info["refund"]
+	_sell_button.set_meta("armed", false)
+	_piece_popup.visible = true
+	_piece_popup.reset_size()
+	# Just above the piece, kept on screen and clear of the top bar and trays.
+	var size: Vector2 = _piece_popup.get_combined_minimum_size()
+	var view: Vector2 = get_viewport().get_visible_rect().size
+	var at: Vector2 = info["screen"] - Vector2(size.x / 2.0, size.y + 70)
+	if at.y < TOP_HEIGHT + 10:
+		at.y = info["screen"].y + 50   # no room above: show it below instead
+	at.x = clampf(at.x, 8, view.x - size.x - 8)
+	at.y = clampf(at.y, TOP_HEIGHT + 10, view.y - BAR_HEIGHT - TRAY_HEIGHT * 2 - size.y - 10)
+	_piece_popup.position = at
+	_set_hint("%s: Move, Turn or Sell. Tap elsewhere to close." % info["name"])
+
+
+func _on_piece_move() -> void:
+	if grid.move_selected():
+		_piece_popup.visible = false
+		_set_hint("Tap where the %s should go (free). Tap it again to cancel." % _piece_info["name"])
+
+
+func _on_piece_turn() -> void:
+	grid.turn_selected()
+
+
+# Selling asks once more, so a stray tap doesn't sell a table.
+func _on_piece_sell() -> void:
+	if not _sell_button.get_meta("armed", false):
+		_sell_button.set_meta("armed", true)
+		_sell_button.text = "Sure?"
+		return
+	grid.sell_selected()
 
 
 func _set_hint(text: String) -> void:
@@ -495,11 +570,6 @@ func _build_trays() -> void:
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.pressed.connect(_select_tool.bind(entry[1]))
 		_tool_buttons[entry[1]] = button
-	# Which way new tables run: "\\" runs down-right, "/" down-left.
-	_rotate_button = _make_button("Rotate\n\\", 21, build_row, 86)
-	_rotate_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rotate_button.pressed.connect(_on_rotate)
-	build_row.move_child(_rotate_button, 2)
 	var decor := _make_button("Decor", 21, build_row, 86)
 	decor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	decor.pressed.connect(_open_decor)
@@ -932,6 +1002,11 @@ func _open_decor() -> void:
 		return
 	for child in _decor_list.get_children():
 		child.queue_free()
+	for where in ["floor", "wall"]:
+		_add_decor_heading("Floors: earned by achievements" if where == "floor" else "Walls: earned by achievements")
+		for id in GameManager.ROOM_STYLES:
+			if GameManager.ROOM_STYLES[id]["where"] == where:
+				_add_room_row(id)
 	_add_decor_heading("Floor: buy and place")
 	for id in GameManager.DECOR:
 		if GameManager.DECOR[id]["where"] == "floor":
@@ -993,6 +1068,60 @@ func _add_decor_row(id: String) -> void:
 			about.modulate = Color(0.7, 0.7, 0.7)
 			picture.modulate = Color(0.2, 0.2, 0.2)   # a silhouette until it's earned
 	button.pressed.connect(_choose_decor.bind(id))
+
+
+# A floor or wall style: a little picture, how to earn it, and Use.
+func _add_room_row(id: String) -> void:
+	var style: Dictionary = GameManager.ROOM_STYLES[id]
+	var floor: bool = style["where"] == "floor"
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	_decor_list.add_child(row)
+	var picture := TextureRect.new()
+	var atlas := AtlasTexture.new()
+	atlas.atlas = grid.FLOOR_ART[id] if floor else grid.WALL_ART[id]
+	atlas.region = Rect2(0, 0, 48, 24) if floor else Rect2(0, 0, 24, 51)
+	picture.texture = atlas
+	picture.custom_minimum_size = Vector2(72, 84)
+	picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	picture.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	row.add_child(picture)
+	var about := _make_label(20)
+	about.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	about.autowrap_mode = TextServer.AUTOWRAP_WORD
+	row.add_child(about)
+	var button := Button.new()
+	button.add_theme_font_size_override("font_size", 20)
+	button.custom_minimum_size = Vector2(120, 64)
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(button)
+	var current: String = GameManager.floor_style if floor else GameManager.wall_style
+	if not GameManager.room_unlocked(id):
+		var have: int = mini(GameManager.stat(style["stat"]), style["goal"])
+		about.text = "%s\n%s (%d/%d)" % [style["name"], style["task"], have, style["goal"]]
+		button.text = "Locked"
+		button.disabled = true
+		about.modulate = Color(0.7, 0.7, 0.7)
+		picture.modulate = Color(0.35, 0.35, 0.35)
+	elif id == current:
+		about.text = "%s\nIn your tavern now" % style["name"]
+		button.text = "In use"
+		button.disabled = true
+	else:
+		about.text = "%s\nUnlocked: free to switch" % style["name"]
+		button.text = "Use"
+	button.pressed.connect(_choose_room_style.bind(id))
+
+
+func _choose_room_style(id: String) -> void:
+	if GameManager.ROOM_STYLES[id]["where"] == "floor":
+		GameManager.floor_style = id
+	else:
+		GameManager.wall_style = id
+	grid.queue_redraw()
+	grid.layout_changed.emit()   # saves
+	_open_decor()                # refresh the list
 
 
 func _choose_decor(id: String) -> void:

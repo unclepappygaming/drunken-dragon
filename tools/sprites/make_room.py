@@ -130,26 +130,30 @@ def floor_slate(seed):
 # ---------------------------------------------------------------------
 # Walls: one square's stretch of the top-right wall (48 x 24 + 38)
 # ---------------------------------------------------------------------
-def wall_canvas():
-    return Image.new("RGBA", (TW, TH // 2 + WALL_H + 1), (0, 0, 0, 0))
+EW = TW // 2              # one square's stretch of wall in the game (24 x 12 drop)
+
+
+def wall_canvas(w=TW):
+    return Image.new("RGBA", (w, w // 2 + WALL_H + 1), (0, 0, 0, 0))
 
 
 def wall_pixels(img, fill):
     """Calls fill(t, h) for every pixel of the wall: t = 0..1 along it,
     h = 0..1 from the floor up."""
-    for x in range(TW):
+    w = img.width
+    for x in range(w):
         floor_y = WALL_H + x * 0.5           # the wall's foot slopes down to the right
         for y in range(img.height):
             h = (floor_y - y) / WALL_H
             if 0 <= h <= 1:
-                c = fill(x / TW, h, x, y)
+                c = fill((x + 0.5) / w, h, x, y)
                 if c:
                     img.putpixel((x, y), c)
 
 
-def wall_timber(seed):
+def wall_timber(seed, w=TW):
     """Whitewashed plaster between dark timber beams, wood panelling below."""
-    img = wall_canvas()
+    img = wall_canvas(w)
     plaster, beam, panel = (236, 226, 204, 255), (98, 64, 38, 255), (150, 98, 58, 255)
     rnd = random.Random(seed)
 
@@ -167,9 +171,9 @@ def wall_timber(seed):
     return img
 
 
-def wall_stone(seed):
+def wall_stone(seed, w=TW):
     """Rough grey stone blocks with a wooden beam along the top."""
-    img = wall_canvas()
+    img = wall_canvas(w)
     rnd = random.Random(seed)
     tones = [(150, 144, 136, 255), (138, 132, 126, 255), (162, 154, 144, 255)]
 
@@ -187,9 +191,9 @@ def wall_stone(seed):
     return img
 
 
-def wall_logs(seed):
+def wall_logs(seed, w=TW):
     """Stacked round logs, like a hunting lodge."""
-    img = wall_canvas()
+    img = wall_canvas(w)
 
     def fill(t, h, x, y):
         f = (h * 7) % 1

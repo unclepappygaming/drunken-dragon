@@ -35,7 +35,9 @@ extends Walker
 # leave_reason says exactly why they left.
 signal left_tavern(customer: Customer, happy: bool)
 
-enum State { IN_LINE, WALKING_IN, DECIDING, WAITING_FOR_WAITER, WAITING_FOR_FOOD, EATING, LEAVING }
+# FINISHED: done (fed, or nothing they wanted) but still sitting, waiting
+# for the rest of their group so they can all leave together.
+enum State { IN_LINE, WALKING_IN, DECIDING, WAITING_FOR_WAITER, WAITING_FOR_FOOD, EATING, LEAVING, FINISHED }
 
 const WALK_SPEED: float = 170.0      # pixels per second
 # Seconds they'll wait in total, from calling the waiter to getting food.
@@ -179,7 +181,23 @@ func _order_again() -> void:
 
 
 func _seated() -> bool:
-	return state in [State.DECIDING, State.WAITING_FOR_WAITER, State.WAITING_FOR_FOOD, State.EATING]
+	return state in [State.DECIDING, State.WAITING_FOR_WAITER, State.WAITING_FOR_FOOD, State.EATING, State.FINISHED]
+
+
+# Guests who came together leave together: someone who's finished stays
+# at the table until everyone else in their group is finished too.
+func _finish(reason: String) -> void:
+	for friend in party:
+		if friend != self and is_instance_valid(friend) and friend.state in [
+				State.WALKING_IN, State.DECIDING, State.WAITING_FOR_WAITER, State.WAITING_FOR_FOOD, State.EATING]:
+			state = State.FINISHED
+			leave_reason = reason
+			return
+	# Last one done: everybody goes.
+	for friend in party:
+		if friend != self and is_instance_valid(friend) and friend.state == State.FINISHED:
+			friend._start_leaving(friend.leave_reason)
+	_start_leaving(reason)
 
 
 # A bard at their table plays for the room: guests nearby lose patience
@@ -205,6 +223,9 @@ func _process(delta: float) -> void:
 			if patience <= 0.0:
 				_bubble = "Too long!"
 				_start_leaving("gave_up_line")
+				for friend in party:   # whoever they came with goes too
+					if friend != self and is_instance_valid(friend) and friend.state == State.IN_LINE:
+						friend._start_leaving("gave_up_line")
 
 		State.WALKING_IN:
 			if _walk(delta):
@@ -220,7 +241,7 @@ func _process(delta: float) -> void:
 				order = GameManager.pick_order(guest_type)
 				if order.is_empty():
 					_bubble = _nothing_to_order_line()
-					_start_leaving("no_dish")
+					_finish("no_dish")
 					return
 				_bubble = "Waiter!"
 				# Join the line. A free Waiter will come and take the order.
@@ -258,7 +279,7 @@ func _process(delta: float) -> void:
 					_second_helping = true
 					_order_again()
 					return
-				_start_leaving("served")
+				_finish("served")
 
 		State.LEAVING:
 			if _walk(delta):
@@ -309,21 +330,35 @@ func _start_leaving(reason: String) -> void:
 	GameManager.order_requests.erase(self)
 	GameManager.order_queue.erase(self)
 	left_tavern.emit(self, reason == "served")
-	# An adventuring party sticks together: if one storms off, so does
-	# everyone still waiting.
+	# A group sticks together: if one storms off, so does everyone still
+	# waiting, and anyone already finished gets up to go with them.
 	if reason == "impatient":
 		for friend in party:
 			if friend != self and is_instance_valid(friend) and friend.state in [
 					State.WALKING_IN, State.DECIDING, State.WAITING_FOR_WAITER, State.WAITING_FOR_FOOD]:
 				friend.say("We're leaving!")
 				friend._start_leaving("impatient")
+	# Whoever's still eating finishes, then leaves (see _finish); anyone
+	# finished and waiting on us can go now.
+	for friend in party:
+		if friend != self and is_instance_valid(friend) and friend.state == State.FINISHED \
+				and not _anyone_still_busy():
+			friend._start_leaving(friend.leave_reason)
+
+
+func _anyone_still_busy() -> bool:
+	for friend in party:
+		if is_instance_valid(friend) and friend.state in [
+				State.WALKING_IN, State.DECIDING, State.WAITING_FOR_WAITER, State.WAITING_FOR_FOOD, State.EATING]:
+			return true
+	return false
 
 
 # _draw() paints this node. (0, 0) is the guest's own position, so
 # everything is drawn relative to them.
 func _draw() -> void:
 	# On our chair we're drawn sitting (legs hidden by the chair).
-	var seated: bool = state in [State.DECIDING, State.WAITING_FOR_WAITER, State.WAITING_FOR_FOOD, State.EATING] \
+	var seated: bool = _seated() \
 			and _seat != TavernGrid.NO_CELL and current_cell() == _seat and _path.is_empty()
 	draw_sprite(false, seated)
 

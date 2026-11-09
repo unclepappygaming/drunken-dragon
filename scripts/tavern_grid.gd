@@ -31,6 +31,9 @@ signal build_message(text: String)
 # Fired after furniture is built or sold, so anyone mid-walk can plan
 # a new route around it.
 signal layout_changed
+# Build mode: a placed piece was tapped (info about it), or the selection
+# was cleared ({}). The HUD shows a Move / Turn / Sell pop-up over it.
+signal piece_selected(info: Dictionary)
 # Fired when a waiter clears a table, so the next guest in line can sit.
 signal table_freed
 
@@ -146,6 +149,7 @@ var _wall_props: Array[FloorProp] = []
 
 
 func _ready() -> void:
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # crisp floor and wall tiles
 	for finder in [_astar, _cook_astar]:
 		finder.cell_size = Vector2.ONE   # only the square numbers matter
 		# Diagonal steps are allowed, but never squeezing between two pieces
@@ -167,6 +171,12 @@ func _ready() -> void:
 # square you hit.
 func handle_tap(world_pos: Vector2) -> void:
 	if build_type == "":
+		return
+	if build_type == "select":
+		_select_at(world_pos)
+		return
+	if build_type == "move":
+		_try_move_to(world_pos)
 		return
 	# Wall pieces go on the back walls, above the floor.
 	var wall: String = _wall_at(world_pos - position)
@@ -1367,6 +1377,268 @@ func _try_remove(cell: Vector2i) -> void:
 
 
 # ---------------------------------------------------------------------
+# Selecting placed pieces: tap one in Build mode to Move, Turn or Sell it
+# ---------------------------------------------------------------------
+# What's selected (or being moved): {"what": "table" | "decor" |
+# "furniture" | "wall", "anchor": its anchor square (or "top:3" for a
+# wall piece), "name", "turn": can it turn?, "refund": gold if sold}.
+var selected: Dictionary = {}
+
+
+func clear_selection() -> void:
+	selected = {}
+	if build_type == "move":
+		build_type = "select"
+	queue_redraw()
+	piece_selected.emit({})
+
+
+# Whatever's on this square (or this stretch of wall), or {}.
+func _piece_at(world_pos: Vector2) -> Dictionary:
+	var cell: Vector2i = cell_at_world(world_pos)
+	if cell != NO_CELL:
+		if _decor_of.has(cell):
+			var anchor: Vector2i = _decor_of[cell]
+			var info: Dictionary = GameManager.DECOR[decor[anchor]["id"]]
+			return {"what": "decor", "anchor": anchor, "name": info["name"], "turn": true,
+					"refund": floori(info["cost"] / 2.0)}
+		var type: String = furniture.get(cell, "")
+		if type in ["table", "chair"]:
+			var anchor: Vector2i = _table_of[cell]
+			var info: Dictionary = GameManager.FURNITURE[tables[anchor]["kind"]]
+			return {"what": "table", "anchor": anchor, "name": info["name"], "turn": true,
+					"refund": floori(info["cost"] / 2.0)}
+		if type in ["kitchen", "bar"]:
+			var info: Dictionary = GameManager.FURNITURE[type]
+			return {"what": "furniture", "anchor": cell, "name": info["name"], "turn": false,
+					"refund": floori(info["cost"] / 2.0)}
+		if type == "expo":
+			build_message.emit("The pass moves with the kitchen (Move Kitchen).")
+			return {}
+	var wall: String = _wall_at(world_pos - position)
+	if wall_decor.has(wall):
+		return {"what": "wall", "anchor": wall, "name": GameManager.DECOR[wall_decor[wall]]["name"],
+				"turn": false, "refund": 0}
+	return {}
+
+
+func _select_at(world_pos: Vector2) -> void:
+	var piece: Dictionary = _piece_at(world_pos)
+	if piece.is_empty() or (not selected.is_empty() and piece["anchor"] == selected["anchor"]):
+		clear_selection()   # tapping empty floor, or the same piece again, closes the pop-up
+		return
+	selected = piece
+	queue_redraw()
+	piece_selected.emit(_with_screen_spot(piece))
+
+
+# Adds where the piece is on screen, so the pop-up can sit above it.
+func _with_screen_spot(piece: Dictionary) -> Dictionary:
+	var at: Vector2
+	match piece["what"]:
+		"wall":
+			var parts: PackedStringArray = str(piece["anchor"]).split(":")
+			var i: float = int(parts[1]) + 0.5
+			at = position + iso(Vector2(i, 0) if parts[0] == "top" else Vector2(0, i)) + Vector2(0, -WALL_HEIGHT)
+		"table":
+			at = Vector2.ZERO
+			for c in tables[piece["anchor"]]["tops"]:
+				at += cell_center(c)
+			at /= tables[piece["anchor"]]["tops"].size()
+		_:
+			at = cell_center(piece["anchor"])
+	var info: Dictionary = piece.duplicate()
+	info["screen"] = get_viewport().get_canvas_transform() * at   # `at` is in world space
+	return info
+
+
+func _piece_cells(piece: Dictionary) -> Array:
+	match piece.get("what", ""):
+		"table":
+			if tables.has(piece["anchor"]):
+				return tables[piece["anchor"]]["tops"] + tables[piece["anchor"]]["chairs"]
+		"decor":
+			if decor.has(piece["anchor"]):
+				return decor[piece["anchor"]]["cells"]
+		"furniture":
+			return [piece["anchor"]]
+	return []
+
+
+# Why the selected piece can't be picked up right now, or "".
+func _busy_reason(piece: Dictionary) -> String:
+	match piece["what"]:
+		"table":
+			var anchor: Vector2i = piece["anchor"]
+			if table_owner.get(anchor) != null:
+				return "Someone's sitting there!"
+			if _dirty_count(anchor) > 0 or _bussers.has(anchor):
+				return "Clear the plates first!"
+		"furniture":
+			var cell: Vector2i = piece["anchor"]
+			if hearths.has(cell) and not hearths[cell]["job"].is_empty():
+				return "That Hearth is busy!"
+	return ""
+
+
+func sell_selected() -> void:
+	if selected.is_empty():
+		return
+	if selected["what"] == "wall":
+		var wall: String = selected["anchor"]
+		var taken: String = wall_decor[wall]
+		wall_decor.erase(wall)
+		layout_changed.emit()
+		build_message.emit("Took down the %s. Hang it again from Decor." % GameManager.DECOR[taken]["name"])
+	else:
+		_try_remove(selected["anchor"])
+	clear_selection()
+
+
+# Tables swing round to run the other way (on the same middle square);
+# decorations face the other way.
+func turn_selected() -> void:
+	if selected.is_empty() or not selected["turn"]:
+		return
+	var reason: String = _busy_reason(selected)
+	if reason != "":
+		build_message.emit(reason)
+		return
+	var anchor: Vector2i = selected["anchor"]
+	if selected["what"] == "decor":
+		decor[anchor]["flip"] = not decor[anchor]["flip"]
+		if _props.has(anchor):
+			_props[anchor].queue_redraw()
+	else:
+		var table: Dictionary = tables[anchor]
+		var kind: String = table["kind"]
+		var old_dir: Vector2i = table["dir"]
+		var new_dir := Vector2i(old_dir.y, old_dir.x)
+		_remove_table(anchor)
+		var problem: String = _table_problem(kind, anchor, new_dir)
+		if problem == "" and not _layout_works_with_table(kind, anchor, new_dir):
+			problem = "Turned, it would block someone's way!"
+		_place_table(kind, anchor, new_dir if problem == "" else old_dir)
+		if problem != "":
+			build_message.emit("Can't turn it: " + problem)
+	queue_redraw()
+	layout_changed.emit()
+	piece_selected.emit(_with_screen_spot(selected))
+
+
+# Pick the selected piece up: the next tap puts it down (for free).
+func move_selected() -> bool:
+	if selected.is_empty():
+		return false
+	var reason: String = _busy_reason(selected)
+	if reason != "":
+		build_message.emit(reason)
+		return false
+	build_type = "move"
+	queue_redraw()
+	return true
+
+
+func _try_move_to(world_pos: Vector2) -> void:
+	var piece: Dictionary = selected
+	if piece.is_empty():
+		build_type = "select"
+		return
+	var problem: String = ""
+	match piece["what"]:
+		"wall":
+			var wall: String = _wall_at(world_pos - position)
+			if wall == piece["anchor"]:
+				clear_selection()
+				return
+			if wall == "":
+				problem = "Tap a stretch of back wall."
+			elif wall_decor.has(wall) or _wall_taken_by_building(wall.split(":")[0], int(wall.split(":")[1])):
+				problem = "There's already something on that wall."
+			else:
+				wall_decor[wall] = wall_decor[piece["anchor"]]
+				wall_decor.erase(piece["anchor"])
+		"table":
+			var cell: Vector2i = cell_at_world(world_pos)
+			if cell == NO_CELL:
+				problem = "Tap a square on the floor."
+			elif _piece_cells(piece).has(cell) and cell == piece["anchor"]:
+				clear_selection()
+				return
+			else:
+				var old: Vector2i = piece["anchor"]
+				var kind: String = tables[old]["kind"]
+				var dir: Vector2i = tables[old]["dir"]
+				_remove_table(old)
+				problem = _table_problem(kind, cell, dir)
+				if problem == "" and not _layout_works_with_table(kind, cell, dir):
+					problem = "That would block someone's way!"
+				_place_table(kind, cell if problem == "" else old, dir)
+		"decor":
+			var cell: Vector2i = cell_at_world(world_pos)
+			if cell == NO_CELL:
+				problem = "Tap a square on the floor."
+			elif cell == piece["anchor"]:
+				clear_selection()
+				return
+			else:
+				var old: Vector2i = piece["anchor"]
+				var id: String = decor[old]["id"]
+				var flip: bool = decor[old]["flip"]
+				_remove_decor(old)
+				problem = _decor_problem(id, cell)
+				_place_decor(id, cell if problem == "" else old, flip)
+		"furniture":
+			var cell: Vector2i = cell_at_world(world_pos)
+			var old: Vector2i = piece["anchor"]
+			var type: String = furniture[old]
+			if cell == old:
+				clear_selection()
+				return
+			problem = _furniture_move_problem(type, old, cell)
+			if problem == "":
+				if type == "kitchen" and is_instance_valid(hearths[old]["cook"]):
+					hearths[old]["cook"].release_hearth()
+				if bars.has(old) and is_instance_valid(bars[old]):
+					bars[old].release_bar_job()
+				furniture.erase(old)
+				hearths.erase(old)
+				bars.erase(old)
+				_remove_prop(old)
+				_set_solid(old, false)
+				_place(cell, type)
+	if problem != "":
+		build_message.emit(problem)
+		return
+	build_message.emit("Moved the %s." % piece["name"])
+	layout_changed.emit()
+	clear_selection()
+
+
+func _furniture_move_problem(type: String, old: Vector2i, cell: Vector2i) -> String:
+	if cell == NO_CELL:
+		return "Tap a square on the floor."
+	if _blocked(cell):
+		return "That square is taken."
+	if type == "kitchen" and not on_line(cell):
+		return "Hearths go on the kitchen's front row."
+	if type == "bar" and in_kitchen(cell):
+		return "The Bar goes in the dining room."
+	if cell == expo_front():
+		return "Keep the spot in front of the pass clear for waiters."
+	if cell == door_cell:
+		return "Keep the doorway clear!"
+	if _cells_in_use(null).has(cell):
+		return "Someone's in the way!"
+	var solid: Dictionary = furniture.duplicate()
+	solid.erase(old)
+	solid[cell] = type
+	if not _layout_works(solid, door_cell, kitchen_pos, kitchen_width):
+		return "That would block someone's way!"
+	return ""
+
+
+# ---------------------------------------------------------------------
 # Decorations
 # ---------------------------------------------------------------------
 # Painting (or unpainting) a square of the Private Dining Room.
@@ -1419,30 +1691,35 @@ func _try_place_decor(anchor: Vector2i) -> void:
 	if not GameManager.decor_available(id):
 		build_message.emit("The %s isn't available yet." % info["name"])
 		return
-	var in_use: Dictionary = _cells_in_use(null)
-	var solid: Dictionary = furniture.duplicate()
-	for cell in _decor_cells(id, anchor):
-		if not _in_bounds(cell):
-			build_message.emit("Not enough room there.")
-			return
-		if _blocked(cell) or in_kitchen(cell) or cell == expo_front() or cell == door_cell:
-			build_message.emit("Something's in the way.")
-			return
-		if in_use.has(cell) and not info.get("walk", false):
-			build_message.emit("Someone's in the way!")
-			return
-		if not info.get("walk", false):
-			solid[cell] = "decor"
-	if not _layout_works(solid, door_cell, kitchen_pos, kitchen_width):
-		build_message.emit("That would block someone's way!")
+	var problem: String = _decor_problem(id, anchor)
+	if problem != "":
+		build_message.emit(problem)
 		return
 	if not GameManager.try_spend(info["cost"]):
 		build_message.emit("Not enough gold!")
 		return
-	# Rotate turns decorations too: the second direction mirrors the piece.
-	_place_decor(id, anchor, build_dir == Vector2i(0, 1))
+	_place_decor(id, anchor)
 	layout_changed.emit()
 	build_message.emit("Placed the %s." % info["name"])
+
+
+# Why this decoration can't go at `anchor`, or "" if it can.
+func _decor_problem(id: String, anchor: Vector2i) -> String:
+	var info: Dictionary = GameManager.DECOR[id]
+	var in_use: Dictionary = _cells_in_use(null)
+	var solid: Dictionary = furniture.duplicate()
+	for cell in _decor_cells(id, anchor):
+		if not _in_bounds(cell):
+			return "Not enough room there."
+		if _blocked(cell) or in_kitchen(cell) or cell == expo_front() or cell == door_cell:
+			return "Something's in the way."
+		if in_use.has(cell) and not info.get("walk", false):
+			return "Someone's in the way!"
+		if not info.get("walk", false):
+			solid[cell] = "decor"
+	if not _layout_works(solid, door_cell, kitchen_pos, kitchen_width):
+		return "That would block someone's way!"
+	return ""
 
 
 func _place_decor(id: String, anchor: Vector2i, flip: bool = false) -> void:
@@ -1735,8 +2012,78 @@ const THEMES: Dictionary = {
 }
 
 
+# Floor and wall tiles (tools/sprites/make_room_tiles.py): 4 variants of
+# each side by side. A floor tile is one square; a wall tile is one
+# square's stretch of the top back wall (mirrored for the left wall).
+const FLOOR_ART: Dictionary = {
+	"boards": preload("res://assets/sprites/room/floor_boards.png"),
+	"flagstones": preload("res://assets/sprites/room/floor_flagstones.png"),
+	"parquet": preload("res://assets/sprites/room/floor_parquet.png"),
+	"marble": preload("res://assets/sprites/room/floor_marble.png"),
+	"slate": preload("res://assets/sprites/room/floor_slate.png"),
+}
+const WALL_ART: Dictionary = {
+	"timber": preload("res://assets/sprites/room/wall_timber.png"),
+	"stone": preload("res://assets/sprites/room/wall_stone.png"),
+	"logs": preload("res://assets/sprites/room/wall_logs.png"),
+	"royal": preload("res://assets/sprites/room/wall_royal.png"),
+}
+# A flat colour under each floor tile, so no hairline gaps show between them.
+const FLOOR_BASE: Dictionary = {
+	"boards": Color8(150, 100, 58), "flagstones": Color8(104, 96, 88), "parquet": Color8(150, 98, 56),
+	"marble": Color8(170, 166, 160), "slate": Color8(150, 150, 146),
+}
+# Window frames and doors match the wall: dark wood, or gold in the hall.
+const WALL_TRIM: Dictionary = {
+	"timber": Color8(92, 60, 36), "stone": Color8(92, 60, 36), "logs": Color8(70, 44, 26), "royal": Color8(196, 156, 64),
+}
+const ROOM_VARIANTS: int = 4
+const LEFT_WALL_SHADE := Color(0.8, 0.8, 0.86)   # the left wall faces away from the light
+
+
 func _c(key: String) -> Color:
+	if key == "trim":
+		return WALL_TRIM[GameManager.wall_style]
 	return THEMES[GameManager.location][key]
+
+
+# Which of the 4 tile variants a square uses: mixed up, but always the same.
+static func _variant(x: int, y: int) -> int:
+	return (x * 7 + y * 13 + (x * y) % 3) % ROOM_VARIANTS
+
+
+func _draw_floor_tile(cell: Vector2i, style: String) -> void:
+	var tile: PackedVector2Array = _diamond(cell)
+	draw_colored_polygon(tile, FLOOR_BASE[style])
+	var top: Vector2 = tile[0]
+	var v: int = _variant(cell.x, cell.y)
+	draw_texture_rect_region(FLOOR_ART[style], Rect2(top.x - TILE_W / 2.0, top.y, TILE_W, TILE_H),
+			Rect2(v * 48, 0, 48, 24))
+
+
+# One square's stretch of back wall, from the floor corner `from`.
+func _draw_wall_tile(from: Vector2, index: int, left: bool) -> void:
+	var tex: Texture2D = WALL_ART[GameManager.wall_style]
+	var v: int = _variant(index, 5 if left else 2)
+	var h: float = tex.get_height() * 2.0
+	if left:
+		draw_set_transform(from, 0.0, Vector2(-1, 1))
+		draw_texture_rect_region(tex, Rect2(0, -WALL_HEIGHT, 48, h), Rect2(v * 24, 0, 24, tex.get_height()), LEFT_WALL_SHADE)
+		draw_set_transform(Vector2.ZERO)
+	else:
+		draw_texture_rect_region(tex, Rect2(from.x, from.y - WALL_HEIGHT, 48, h), Rect2(v * 24, 0, 24, tex.get_height()))
+
+
+# Soft shade on the floor along the back walls, where the light doesn't reach.
+func _draw_wall_shade() -> void:
+	var dark := Color(0.12, 0.08, 0.06, 0.32)
+	var clear := Color(0.12, 0.08, 0.06, 0.0)
+	var depth: float = 0.45
+	var a: Vector2 = iso(Vector2(0, 0))
+	draw_polygon(PackedVector2Array([a, iso(Vector2(cols, 0)), iso(Vector2(cols, depth)), iso(Vector2(depth, depth))]),
+			PackedColorArray([dark, dark, clear, clear]))
+	draw_polygon(PackedVector2Array([a, iso(Vector2(depth, depth)), iso(Vector2(depth, rows)), iso(Vector2(0, rows))]),
+			PackedColorArray([dark, clear, clear, dark]))
 
 
 # The four corners of a square's diamond, in this node's space.
@@ -1750,16 +2097,12 @@ func _diamond(cell: Vector2i) -> PackedVector2Array:
 # Floor, back walls, doormat and build-mode markings. Everything people
 # can stand behind is a FloorProp instead (see draw_prop).
 func _draw() -> void:
-	# Floor tiles.
+	# Floor tiles: the room's floor, slate in the kitchen.
 	for x in cols:
 		for y in rows:
-			var tile: PackedVector2Array = _diamond(Vector2i(x, y))
-			var even: bool = (x + y) % 2 == 0
-			if in_kitchen(Vector2i(x, y)):
-				draw_colored_polygon(tile, _c("kitchen_a") if even else _c("kitchen_b"))
-			else:
-				draw_colored_polygon(tile, _c("floor_a") if even else _c("floor_b"))
-			draw_polyline(tile + PackedVector2Array([tile[0]]), _c("floor_line"), 1.0)
+			var cell := Vector2i(x, y)
+			_draw_floor_tile(cell, "slate" if in_kitchen(cell) else GameManager.floor_style)
+	_draw_wall_shade()
 
 	# The private dining room: crimson carpet, with a gold rope along its
 	# edges.
@@ -1786,10 +2129,10 @@ func _draw() -> void:
 	# Back walls: the top edge (upper right on screen) and the left edge
 	# (upper left). Each wall piece is a floor edge pushed straight up.
 	for x in cols:
-		_draw_back_wall(iso(Vector2(x, 0)), iso(Vector2(x + 1, 0)), _c("plaster_top"), _c("panel_top"),
+		_draw_back_wall(iso(Vector2(x, 0)), iso(Vector2(x + 1, 0)), x, false,
 				door_side == "top" and door_index == x, x % 3 == 1, GameManager.in_hall() and x % 3 == 2)
 	for y in rows:
-		_draw_back_wall(iso(Vector2(0, y)), iso(Vector2(0, y + 1)), _c("plaster_left"), _c("panel_left"),
+		_draw_back_wall(iso(Vector2(0, y)), iso(Vector2(0, y + 1)), y, true,
 				door_side == "left" and door_index == y, y % 3 == 1, GameManager.in_hall() and y % 3 == 2)
 
 	# Decorations hanging on the back walls. The art is drawn for the top
@@ -1820,15 +2163,25 @@ func _draw() -> void:
 				iso(Vector2(kitchen_pos + Vector2i(0, KITCHEN_DEPTH)))])
 		draw_polyline(zone + PackedVector2Array([zone[0]]), Color8(230, 120, 40), 3.0)
 		draw_colored_polygon(_diamond(expo_front()), Color(0.3, 0.6, 1.0, 0.25))
+	# The selected piece glows gold; while it's being moved, it pulses blue.
+	if not selected.is_empty() and build_type in ["select", "move"]:
+		var glow: Color = Color(0.4, 0.75, 1.0, 0.45) if build_type == "move" else Color(1.0, 0.82, 0.3, 0.4)
+		for c in _piece_cells(selected):
+			draw_colored_polygon(_diamond(c), glow)
+			var d: PackedVector2Array = _diamond(c)
+			draw_polyline(d + PackedVector2Array([d[0]]), Color(glow, 0.95), 2.0)
+		if selected["what"] == "wall" and wall_decor.has(selected["anchor"]):
+			var parts: PackedStringArray = str(selected["anchor"]).split(":")
+			var i: int = int(parts[1])
+			var a: Vector2 = iso(Vector2(i, 0)) if parts[0] == "top" else iso(Vector2(0, i))
+			var b: Vector2 = iso(Vector2(i + 1, 0)) if parts[0] == "top" else iso(Vector2(0, i + 1))
+			var up := Vector2(0, -WALL_HEIGHT)
+			draw_polyline(PackedVector2Array([a, b, b + up, a + up, a]), Color(glow, 0.95), 3.0)
 
 
-func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, door: bool, window: bool, banner: bool = false) -> void:
+func _draw_back_wall(from: Vector2, to: Vector2, index: int, left: bool, door: bool, window: bool, banner: bool = false) -> void:
 	var up := Vector2(0, -WALL_HEIGHT)
-	draw_colored_polygon(PackedVector2Array([from, to, to + up, from + up]), plaster)
-	var panel_up: Vector2 = up * 0.38                       # wood panelling along the bottom
-	draw_colored_polygon(PackedVector2Array([from, to, to + panel_up, from + panel_up]), panel)
-	draw_line(from + up, to + up, _c("trim"), 4.0)                # top trim
-	draw_line(from + panel_up, to + panel_up, _c("trim"), 2.0)
+	_draw_wall_tile(from, index, left)
 	var along: Vector2 = to - from
 	if door:
 		# A wooden door in the wall.
@@ -1846,9 +2199,18 @@ func _draw_back_wall(from: Vector2, to: Vector2, plaster: Color, panel: Color, d
 		# itself stays lit; see lighting.gd).
 		var night: float = Lighting.night_at(GameManager.OPEN_HOUR + GameManager.minutes_since_open / 60.0) \
 				if GameManager.is_open or _candles_lit() else 0.0
-		draw_colored_polygon(PackedVector2Array([a, b, b + win_up, a + win_up]), Color8(175, 214, 236).lerp(Color8(40, 50, 95), night))
-		draw_polyline(PackedVector2Array([a, b, b + win_up, a + win_up, a]), _c("trim"), 2.0)
+		var sky: Color = Color8(150, 196, 222).lerp(Color8(40, 50, 95), night)
+		draw_colored_polygon(PackedVector2Array([a, b, b + win_up, a + win_up]), sky)
+		# lighter sky in the top half, and a glint on the glass
+		draw_colored_polygon(PackedVector2Array([a + win_up * 0.5, b + win_up * 0.5, b + win_up, a + win_up]), sky.lightened(0.18))
+		draw_line(a + (b - a) * 0.2 + win_up * 0.85, a + (b - a) * 0.35 + win_up * 0.85, Color(1, 1, 1, 0.6 * (1.0 - night)), 2.0)
+		draw_polyline(PackedVector2Array([a, b, b + win_up, a + win_up, a]), _c("trim"), 3.0)
 		draw_line((a + b) / 2.0, (a + b) / 2.0 + win_up, _c("trim"), 2.0)
+		draw_line(a + win_up * 0.5, b + win_up * 0.5, _c("trim"), 2.0)
+		# the sill
+		var out := Vector2(4, 2) if left else Vector2(-4, 2)   # out from the wall, into the room
+		draw_colored_polygon(PackedVector2Array([a - along * 0.06, b + along * 0.06, b + along * 0.06 + out, a - along * 0.06 + out]), Color8(160, 112, 70))
+		draw_line(a - along * 0.06 + out, b + along * 0.06 + out, Color8(80, 52, 32), 2.0)
 	elif banner:
 		# A crimson banner with a gold border, hanging from the top trim.
 		var a: Vector2 = from + along * 0.3 + up * 0.95

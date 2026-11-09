@@ -13,7 +13,7 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 
 - **Tables** are three squares in a row: a chair, the table, a chair (2
   seats, 100g). A **Long Table** is two of those side by side (4 seats,
-  220g). **Rotate** in the Build tray turns new tables the other way.
+  220g). In Build mode, tap any table to **Move**, **Turn** or **Sell** it.
   Guests sit on the chairs, and each group (one guest, a pair or a party)
   gets a whole table, so match your tables to your crowd: parties of 3
   need a Long Table.
@@ -103,8 +103,14 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 
 The bottom bar has four buttons:
 
-- **Build** opens a tray: Table, Long Table, Rotate, Hearth, Bar, Sell,
+- **Build** opens a tray: Table, Long Table, Hearth, Bar, Sell,
   Door, Move Kitchen, Private Room, Decor, Expand.
+  - With no tool picked, **tap anything you've placed** (a table, Hearth,
+    Bar, decoration or wall trophy) for a pop-up: **Move** picks it up and
+    your next tap puts it down (free); **Turn** swings a table round or
+    faces a decoration the other way; **Sell** gives half back (tap twice
+    to be sure). A table can't be moved while someone sits at it or its
+    plates are still out, nor a Hearth while it's cooking.
   - **Bar** (300g): a counter for a bartender, who stands behind it.
   - **Private Room** (Grand Hall only, 40g a square): paint squares with a
     crimson carpet. A table standing wholly on it is private: nobles are
@@ -124,8 +130,8 @@ The bottom bar has four buttons:
       Ale Barrels 90g, Rug 120g (people walk over it), Suit of Armour 250g,
       Bookshelf 250g, Fireplace 400g (its fire flickers) and the Dragon
       Statue 1500g, which covers 2 x 2 squares and needs Legendary rank.
-      **Rotate** turns them before placing (a bookshelf or fireplace can
-      stand against either back wall). Sell gives half back.
+      Tap one after placing it to **Turn** it (a bookshelf or fireplace can
+      stand against either back wall) or Move it. Sell gives half back.
     - **Wall trophies** are earned by achievements, never bought, and hang
       on a stretch of back wall (not over windows, banners or the door).
       Tap a hung piece with Sell to take it down; "Move" re-hangs it.

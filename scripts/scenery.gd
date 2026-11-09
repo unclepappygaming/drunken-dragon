@@ -56,6 +56,16 @@ const GROUND: Dictionary = {
 	"city": [Color8(152, 148, 140), Color8(142, 138, 131), Color8(118, 114, 108)],
 	"forest": [Color8(66, 112, 70), Color8(60, 104, 66), Color8(90, 140, 86)],
 }
+# Seamless ground patches (tools/sprites/make_room_tiles.py), repeated
+# across the whole area at 2x.
+const GROUND_ART: Dictionary = {
+	"meadow": preload("res://assets/sprites/room/ground_meadow.png"),
+	"city": preload("res://assets/sprites/room/ground_city.png"),
+	"forest": preload("res://assets/sprites/room/ground_forest.png"),
+	"path": preload("res://assets/sprites/room/ground_path.png"),
+	"street": preload("res://assets/sprites/room/ground_street.png"),
+}
+const GROUND_REPEAT: float = 256.0   # world pixels per patch (128 drawn at 2x)
 const PATH_COLOR := Color8(196, 164, 112)
 const STREET_COLOR := Color8(126, 122, 116)
 
@@ -75,6 +85,7 @@ func _ready() -> void:
 	_overlay.draw.connect(_draw_overlay)
 	_overlay.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED   # the ground patches tile
 
 
 func set_style(new_style: String) -> void:
@@ -275,19 +286,41 @@ func light_spots() -> Array:
 # Drawing
 # ---------------------------------------------------------------------
 func _draw() -> void:
-	var colors: Array = GROUND[style]
+	# One big patch of ground under everything (the tavern floor covers
+	# its part), then the paths on top, then little extras.
+	var a := Vector2(-MARGIN, -MARGIN)
+	var b := Vector2(grid.cols + MARGIN, grid.rows + MARGIN)
+	_draw_textured(PackedVector2Array([grid.iso(a), grid.iso(Vector2(b.x, a.y)), grid.iso(b), grid.iso(Vector2(a.x, b.y))]),
+			GROUND_ART[style])
+	var path_art: Texture2D = GROUND_ART["street" if style == "city" else "path"]
+	for cell in _path:
+		var tile := PackedVector2Array([grid.iso(Vector2(cell)), grid.iso(Vector2(cell) + Vector2(1, 0)),
+				grid.iso(Vector2(cell) + Vector2(1, 1)), grid.iso(Vector2(cell) + Vector2(0, 1))])
+		_draw_textured(tile, path_art)
 	for x in range(-MARGIN, grid.cols + MARGIN):
 		for y in range(-MARGIN, grid.rows + MARGIN):
 			var cell := Vector2i(x, y)
-			if x >= 0 and y >= 0 and x < grid.cols and y < grid.rows:
-				continue   # the tavern floor is drawn by the grid
-			var tile := PackedVector2Array([grid.iso(Vector2(x, y)), grid.iso(Vector2(x + 1, y)),
-					grid.iso(Vector2(x + 1, y + 1)), grid.iso(Vector2(x, y + 1))])
-			var color: Color = colors[(x + y) % 2]
-			if _path.has(cell):
-				color = STREET_COLOR if style == "city" else PATH_COLOR
-			draw_colored_polygon(tile, color)
-			_draw_ground_detail(cell, tile, color)
+			if (x >= 0 and y >= 0 and x < grid.cols and y < grid.rows) or _path.has(cell):
+				continue
+			_draw_ground_detail(cell, PackedVector2Array([grid.iso(Vector2(x, y)), grid.iso(Vector2(x + 1, y)),
+					grid.iso(Vector2(x + 1, y + 1)), grid.iso(Vector2(x, y + 1))]), GROUND[style][0])
+	# The tavern's shadow on the ground in front of its two open sides.
+	var sh := Color(0.05, 0.08, 0.04, 0.22)
+	var no := Color(0.05, 0.08, 0.04, 0.0)
+	var c0: Vector2 = grid.iso(Vector2(0, grid.rows))
+	var c1: Vector2 = grid.iso(Vector2(grid.cols, grid.rows))
+	var c2: Vector2 = grid.iso(Vector2(grid.cols, 0))
+	draw_polygon(PackedVector2Array([c0, c1, c1 + Vector2(-14, 14), c0 + Vector2(-14, 14)]), PackedColorArray([sh, sh, no, no]))
+	draw_polygon(PackedVector2Array([c1, c2, c2 + Vector2(14, 14), c1 + Vector2(14, 14)]), PackedColorArray([sh, sh, no, no]))
+
+
+# A polygon filled with a repeating ground patch, lined up with the world
+# so neighbouring polygons join without seams.
+func _draw_textured(points: PackedVector2Array, tex: Texture2D) -> void:
+	var uvs := PackedVector2Array()
+	for p in points:
+		uvs.append(p / GROUND_REPEAT)
+	draw_colored_polygon(points, Color.WHITE, uvs, tex)
 
 
 # Little touches that make the ground look less flat: blades of grass and
@@ -299,10 +332,7 @@ func _draw_ground_detail(cell: Vector2i, tile: PackedVector2Array, color: Color)
 		"meadow", "forest":
 			if _path.has(cell):
 				return
-			for k in 3:
-				var spot: Vector2 = middle + Vector2(((h >> (k * 4)) % 60) - 30, ((h >> (k * 4 + 2)) % 24) - 12)
-				draw_rect(Rect2(spot, Vector2(2, 4)), GROUND[style][2])
-			if style == "meadow" and h % 7 == 0:
+			if style == "meadow" and h % 23 == 0:
 				var flower: Color = [Color8(240, 220, 90), Color8(240, 240, 240), Color8(220, 120, 160)][h % 3]
 				draw_rect(Rect2(middle + Vector2((h % 30) - 15, 2), Vector2(4, 4)), flower)
 			if style == "forest" and h % 11 == 0:   # a glowing toadstool
@@ -311,11 +341,7 @@ func _draw_ground_detail(cell: Vector2i, tile: PackedVector2Array, color: Color)
 				draw_rect(Rect2(at + Vector2(-4, -8), Vector2(9, 4)), Color8(80, 210, 220))
 				draw_circle(at + Vector2(0, -6), 9.0, Color(0.4, 0.9, 1.0, 0.18))
 		"city":
-			# Four cobbles per square
-			var line: Color = color.darkened(0.18)
-			draw_line((tile[0] + tile[1]) / 2.0, (tile[2] + tile[3]) / 2.0, line, 1.0)
-			draw_line((tile[1] + tile[2]) / 2.0, (tile[3] + tile[0]) / 2.0, line, 1.0)
-			draw_polyline(tile + PackedVector2Array([tile[0]]), line, 1.0)
+			pass   # the cobbles are in the ground art
 
 
 func _draw_art(canvas: CanvasItem, tex: Texture2D, at: Vector2, anchor: Vector2, mirror: bool = false) -> void:

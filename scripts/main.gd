@@ -67,6 +67,7 @@ func _ready() -> void:
 	hud.move_requested.connect(_on_move_requested)
 	hud.skip_ahead_requested.connect(_on_skip_ahead)
 	hud.grid = grid
+	grid.piece_selected.connect(hud.show_piece_popup)
 	# You can connect a signal straight to another node's function.
 	grid.build_message.connect(hud.show_message)
 	camera.tapped.connect(grid.handle_tap)
@@ -292,7 +293,7 @@ func _seat_party(cell: Vector2i, size: int) -> void:
 # nobody's waiting), otherwise they wait in line side by side.
 func _pair_arrives(cell: Vector2i) -> void:
 	if cell != TavernGrid.NO_CELL and _line.is_empty():
-		_seat_group(_spawn_group(GuestTypes.pick_pair_type(), 2), cell)
+		_seat_group(_spawn_group(GuestTypes.pick_pair_type(GameManager.fame), 2), cell)
 		return
 	var room: int = MAX_LINE - _line.size()
 	if room <= 0:
@@ -300,7 +301,7 @@ func _pair_arrives(cell: Vector2i) -> void:
 		hud.show_message("The line is full! Two guests went elsewhere.")
 		return
 	# With room for only one, the other goes home without counting against you.
-	var members: Array = _spawn_group(GuestTypes.pick_pair_type(), mini(room, 2))
+	var members: Array = _spawn_group(GuestTypes.pick_pair_type(GameManager.fame), mini(room, 2))
 	for guest in members:
 		_line.append(guest)
 		guest.wait_in_line(_line_spot(_line.size() - 1))
@@ -424,6 +425,10 @@ func _announce_unlocks(ids: Array[String], speaker: Customer) -> void:
 		var piece: Dictionary = GameManager.DECOR[id]
 		hud.show_message("Trophy earned: %s! Hang it from Build > Decor." % piece["name"], 5.0)
 		GameManager.today_news.append("Trophy earned: %s (%s)." % [piece["name"], piece["task"]])
+	for id in GameManager.check_room_unlocks():
+		var style: Dictionary = GameManager.ROOM_STYLES[id]
+		hud.show_message("Unlocked: %s! Try it from Build > Decor." % style["name"], 5.0)
+		GameManager.today_news.append("New %s unlocked: %s (%s)." % [style["where"], style["name"], style["task"]])
 	var expansion_quest: String = GameManager.check_expansion_ready()
 	if expansion_quest != "":
 		hud.show_message("Quest done: %s! You can expand the tavern (Build > Expand)." % expansion_quest, 6.0)
@@ -517,6 +522,8 @@ func _on_skip_ahead() -> void:
 	for id in GameManager.DECOR:
 		if GameManager.DECOR[id]["where"] == "wall":
 			GameManager.stats["trophy:" + id] = 1
+	for id in GameManager.ROOM_STYLES:
+		GameManager.stats["room:" + id] = 1
 	GameManager.recipes_changed.emit()
 	_update_staff_display()
 	_save_if_closed()

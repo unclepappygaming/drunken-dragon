@@ -89,6 +89,20 @@ const DECOR: Dictionary = {
 	"kraken":    {"name": "Kraken Tentacles", "where": "wall", "stat": "moved", "goal": 1, "task": "Move to the Grand Hall", "frames": 4},
 }
 
+# Floors and walls for the whole room (Build > Decor). The first of each is
+# what a new tavern has; the others are unlocked by achievements and then
+# free to switch to any time. Art: tools/sprites/make_room_tiles.py.
+const ROOM_STYLES: Dictionary = {
+	"boards":     {"name": "Oak Floorboards", "where": "floor"},
+	"flagstones": {"name": "Flagstones", "where": "floor", "stat": "served", "goal": 150, "task": "Serve 150 guests"},
+	"parquet":    {"name": "Parquet", "where": "floor", "stat": "perfect_days", "goal": 5, "task": "Have 5 perfect days"},
+	"marble":     {"name": "Marble", "where": "floor", "stat": "moved", "goal": 1, "task": "Move to the Grand Hall"},
+	"timber":     {"name": "Timber & Plaster", "where": "wall"},
+	"stone":      {"name": "Stone Walls", "where": "wall", "stat": "expansions", "goal": 2, "task": "Expand the tavern twice"},
+	"logs":       {"name": "Log Cabin", "where": "wall", "stat": "dish:boar", "goal": 40, "task": "Serve 40 Roast Boars"},
+	"royal":      {"name": "Royal Crimson", "where": "wall", "stat": "moved", "goal": 1, "task": "Move to the Grand Hall"},
+}
+
 # Staff types, traits and wages live in staff_profiles.gd. Each day a few
 # people apply for each job; you pick who to hire.
 const APPLICANTS_PER_ROLE: int = 3
@@ -278,6 +292,8 @@ var stats: Dictionary = {}
 
 var expansions_built: int = 0   # in the current location
 var location: String = "tavern"   # "tavern" or "grand_hall"
+var floor_style: String = "boards"   # keys of ROOM_STYLES
+var wall_style: String = "timber"
 
 # Today's job applicants: role ("cook"/"waiter") -> Array of profiles.
 # New faces every day.
@@ -423,6 +439,8 @@ func reset() -> void:
 	stats = {}
 	expansions_built = 0
 	location = "tavern"
+	floor_style = "boards"
+	wall_style = "timber"
 	_applicants_day = -1
 	order_requests.clear()
 	order_queue.clear()
@@ -450,6 +468,7 @@ func save_game(layout: Array, door: Array, kitchen: Array, staff: Array, decor: 
 		"expansions": expansions_built,
 		"location": location,
 		"decor": decor,
+		"room": {"floor": floor_style, "wall": wall_style},
 		"staff": staff,
 		"recipes": known_recipes,
 		"menu": menu,
@@ -493,6 +512,15 @@ func load_game() -> Dictionary:
 	stats["days"] = maxi(stat("days"), day)
 	# Saves from before the Grand Hall are in the tavern.
 	location = "grand_hall" if parsed.get("location", "") == "grand_hall" else "tavern"
+	# Saves from before floor and wall styles: what that place looked like.
+	var room = parsed.get("room", {})
+	room = room if typeof(room) == TYPE_DICTIONARY else {}
+	floor_style = str(room.get("floor", "marble" if location == "grand_hall" else "boards"))
+	wall_style = str(room.get("wall", "royal" if location == "grand_hall" else "timber"))
+	if not ROOM_STYLES.has(floor_style) or ROOM_STYLES[floor_style]["where"] != "floor":
+		floor_style = "boards"
+	if not ROOM_STYLES.has(wall_style) or ROOM_STYLES[wall_style]["where"] != "wall":
+		wall_style = "timber"
 	# Saves from before expansions: the original floor.
 	expansions_built = clampi(int(parsed.get("expansions", 0)), 0, expansion_list().size())
 	if version < 5:
@@ -656,6 +684,23 @@ func check_trophies() -> Array[String]:
 	return earned
 
 
+# Floor and wall styles unlocked so far. Returns the ones just unlocked.
+func check_room_unlocks() -> Array[String]:
+	var earned: Array[String] = []
+	for id in ROOM_STYLES:
+		var info: Dictionary = ROOM_STYLES[id]
+		if not info.has("stat") or stat("room:" + id) > 0:
+			continue
+		if stat(info["stat"]) >= info["goal"]:
+			stats["room:" + id] = 1
+			earned.append(id)
+	return earned
+
+
+func room_unlocked(id: String) -> bool:
+	return not ROOM_STYLES[id].has("stat") or stat("room:" + id) > 0
+
+
 func has_trophy(id: String) -> bool:
 	return stat("trophy:" + id) > 0
 
@@ -737,6 +782,8 @@ func move_to_hall() -> bool:
 	location = "grand_hall"
 	expansions_built = 0
 	add_stat("moved")
+	floor_style = "marble"   # the hall comes with marble and crimson
+	wall_style = "royal"
 	return true
 
 
@@ -900,10 +947,16 @@ func busyness() -> float:
 # the daily review, so build more Tables and hire more staff as fame grows.
 # In the Grand Hall the crowds grow with the hall instead: every
 # expansion brings guests faster, down to about one a second.
+# Seconds between arrivals. Most arrivals are pairs now (GuestTypes.
+# PAIR_SHARE), so arrivals are spaced out by ARRIVAL_SPREAD to keep about
+# the same number of guests per day as when most came alone.
+const ARRIVAL_SPREAD: float = 1.35
+
+
 func get_spawn_interval() -> float:
 	if in_hall():
-		return max(1.0, 2.6 - 0.35 * expansions_built) / busyness()
-	return max(2.5, 6.5 - fame * 0.04) / busyness()
+		return max(1.0, 2.6 - 0.35 * expansions_built) * ARRIVAL_SPREAD / busyness()
+	return max(2.5, 6.5 - fame * 0.04) * ARRIVAL_SPREAD / busyness()
 
 
 # ---------------------------------------------------------------------

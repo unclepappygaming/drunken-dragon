@@ -84,11 +84,12 @@ const TYPES: Dictionary = {
 
 # How often each type walks in, out of the total, and the fame needed
 # before they start coming. Nobles only come to banquets; the Old
-# Regular comes at most once a day. A "pair" is two guests of one common
-# type (see PAIR_TYPES) who share a table, sitting across from each other.
+# Regular comes at most once a day. A "pair" is two guests of one type
+# (see PAIR_TYPES) who share a table, sitting across from each other:
+# PAIR_SHARE of everyone who walks in comes as a pair.
+const PAIR_SHARE: float = 0.6
 const ARRIVALS: Array = [
 	{"type": "farmer", "weight": 35, "fame": 0},
-	{"type": "pair", "weight": 15, "fame": 0},
 	{"type": "guard", "weight": 20, "fame": 0},
 	{"type": "merchant", "weight": 15, "fame": 0},
 	{"type": "regular", "weight": 8, "fame": 0},
@@ -99,16 +100,24 @@ const ARRIVALS: Array = [
 	{"type": "wizard", "weight": 5, "fame": 55},
 ]
 
-# Who comes as a pair, and how often (weights).
-const PAIR_TYPES: Dictionary = {"farmer": 60, "merchant": 25, "guard": 15}
+# Who comes as a pair: [weight, fame needed].
+const PAIR_TYPES: Dictionary = {
+	"farmer": [40, 0], "merchant": [22, 0], "guard": [18, 0],
+	"miner": [8, 20], "elf": [7, 40], "wizard": [5, 55],
+}
 
 
-static func pick_pair_type() -> String:
-	var roll: int = randi() % 100
-	for type in PAIR_TYPES:
-		roll -= PAIR_TYPES[type]
+static func pick_pair_type(fame: int = 0) -> String:
+	var choices: Array = PAIR_TYPES.keys().filter(func(t): return fame >= PAIR_TYPES[t][1] \
+			and (t != "elf" or GameManager.menu.has("wine")))
+	var total: int = 0
+	for t in choices:
+		total += PAIR_TYPES[t][0]
+	var roll: int = randi() % total
+	for t in choices:
+		roll -= PAIR_TYPES[t][0]
 		if roll < 0:
-			return type
+			return t
 	return "farmer"
 
 
@@ -139,6 +148,8 @@ const SHEETS: Dictionary = {
 # Picks who walks in next. `regular_allowed` is false once the Old
 # Regular has already been in today.
 static func pick_arrival(fame: int, regular_allowed: bool) -> String:
+	if randf() < PAIR_SHARE:
+		return "pair"
 	var choices: Array = ARRIVALS.filter(func(a): return fame >= a["fame"] \
 			and (regular_allowed or a["type"] != "regular") \
 			and (a["type"] != "elf" or GameManager.menu.has("wine")))   # elves only come for the wine
