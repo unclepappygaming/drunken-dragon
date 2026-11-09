@@ -114,14 +114,27 @@ func take_table(cell: Vector2i, seat: Vector2i = TavernGrid.NO_CELL) -> void:
 	patience = MAX_PATIENCE * _patience_scale
 	if GameManager.today_event == "rain":
 		patience *= GameManager.RAIN_PATIENCE   # in no hurry to go back out in the rain
+	if _has_host():
+		patience += HOST_WELCOME
+	if is_noble and grid.is_private_table(cell):
+		patience *= PRIVATE_BONUS + 1.0   # nobles relax in the private room
 	_patience_max = patience
 	# Sit on a free square beside the table, not on top of it.
 	go_to_cell(seat if seat != TavernGrid.NO_CELL else grid.access_cell(cell, position, self))
 
 
+const HOST_LINE: float = 2.0      # with a host, guests wait this much longer in line
+const PRIVATE_BONUS: float = 0.3  # nobles at a private table pay and wait this much more
+const HOST_WELCOME: float = 10.0  # and sit down with this many more seconds of patience
+
+
+func _has_host() -> bool:
+	return not get_tree().get_nodes_in_group("hosts").is_empty()
+
+
 func wait_in_line(spot: Vector2) -> void:
 	state = State.IN_LINE
-	patience = LINE_PATIENCE * _patience_scale
+	patience = LINE_PATIENCE * _patience_scale * (HOST_LINE if _has_host() else 1.0)
 	_patience_max = patience
 	go_to_outside_spot(spot)
 
@@ -226,6 +239,8 @@ func _process(delta: float) -> void:
 				var share: float = 1.0 + price_bonus + GuestTypes.TYPES[guest_type]["pay"]
 				if is_noble:
 					share += GameManager.NOBLE_TIP   # nobles tip well
+					if grid.is_private_table(table_cell):
+						share += PRIVATE_BONUS
 				if GameManager.in_hall():
 					share += GameManager.HALL_PRICE_BONUS   # city prices
 				if GameManager.today_event == "festival":

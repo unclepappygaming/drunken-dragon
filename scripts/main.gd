@@ -150,7 +150,8 @@ func _process(_delta: float) -> void:
 	# the waiters have cleared the tables (if there are any waiters).
 	# get_nodes_in_group asks for every node tagged "customers".
 	if _waiting_for_last_guests and get_tree().get_nodes_in_group("customers").is_empty() \
-			and (not grid.has_dirty_tables() or get_tree().get_nodes_in_group("waiters").is_empty()):
+			and (not grid.has_dirty_tables() or (get_tree().get_nodes_in_group("waiters").is_empty() \
+				and get_tree().get_nodes_in_group("dishwashers").is_empty())):
 		_waiting_for_last_guests = false
 		grid.wash_all_tables()
 		_show_day_summary()
@@ -314,10 +315,10 @@ func _noble_arrives() -> void:
 	_vip_arrives(_spawn_customer("noble"))
 
 
-# Nobles and the food critic don't queue: they get the next free table,
-# or go to the front of the line if there isn't one.
+# Nobles and the food critic don't queue: they get the next free table
+# (nobles a private one if there is one), or go to the front of the line.
 func _vip_arrives(guest: Customer) -> void:
-	var cell: Vector2i = grid.find_free_table()
+	var cell: Vector2i = grid.find_free_table(1, "first" if guest.is_noble else "avoid")
 	if cell != TavernGrid.NO_CELL:
 		_seat(guest, cell)
 	else:
@@ -530,6 +531,16 @@ func max_staff() -> int:
 	return HALL_MAX_STAFF if GameManager.in_hall() else MAX_STAFF
 
 
+# How many of a role you can have: one host, a few dishwashers, a
+# bartender per Bar, and up to max_staff() cooks and waiters.
+func role_limit(role: String) -> int:
+	match role:
+		"host": return 1
+		"dishwasher": return 3
+		"bartender": return grid.bars.size()
+	return max_staff()
+
+
 # Rushes start straight away: guests already on the way come sooner.
 func _on_rush_changed(rush_name: String) -> void:
 	if rush_name == "":
@@ -564,7 +575,10 @@ func _staff_changes_allowed() -> bool:
 func _on_hire_requested(role: String, index: int) -> void:
 	if not _staff_changes_allowed():
 		return
-	if get_tree().get_nodes_in_group(role + "s").size() >= max_staff():
+	if role == "bartender" and grid.bars.is_empty():
+		hud.show_message("Build a Bar first (Build tray), then hire someone to work it.")
+		return
+	if get_tree().get_nodes_in_group(role + "s").size() >= role_limit(role):
 		hud.show_message("That's plenty of %ss!" % role)
 		return
 	var candidates: Array = GameManager.applicants(role)
@@ -592,8 +606,8 @@ func _on_fire_requested(uid: int) -> void:
 		if person.profile["uid"] != uid:
 			continue
 		var role: String = StaffProfiles.role_of(person.profile)
-		# Without at least one of each, nobody could ever be served.
-		if get_tree().get_nodes_in_group(role + "s").size() <= 1:
+		# Without at least one cook and one waiter, nobody could be served.
+		if role in StaffProfiles.ESSENTIAL and get_tree().get_nodes_in_group(role + "s").size() <= 1:
 			hud.show_message("You need at least one %s." % role)
 			return
 		person.leave()
@@ -620,9 +634,9 @@ func _load_staff(save: Dictionary) -> void:
 	var saved = save.get("staff", null)
 	if typeof(saved) == TYPE_ARRAY:
 		for entry in saved:
-			for role in ["cook", "waiter"]:
+			for role in StaffProfiles.ROLES:
 				var profile: Dictionary = StaffProfiles.clean(entry, role)
-				if not profile.is_empty() and get_tree().get_nodes_in_group(role + "s").size() < max_staff():
+				if not profile.is_empty() and get_tree().get_nodes_in_group(role + "s").size() < role_limit(role):
 					_hire(profile)
 	else:
 		for i in clampi(int(save.get("cooks", 1)), 1, max_staff()):
@@ -637,7 +651,10 @@ func _load_staff(save: Dictionary) -> void:
 
 # Everyone on staff (not counting anyone already walking out).
 func _all_staff() -> Array:
-	return get_tree().get_nodes_in_group("cooks") + get_tree().get_nodes_in_group("waiters")
+	var everyone: Array = []
+	for role in StaffProfiles.ROLES:
+		everyone += get_tree().get_nodes_in_group(role + "s")
+	return everyone
 
 
 func _staff_profiles() -> Array:
@@ -651,7 +668,8 @@ func _show_staff_list() -> void:
 func _update_staff_display() -> void:
 	var cooks: int = get_tree().get_nodes_in_group("cooks").size()
 	var waiters: int = get_tree().get_nodes_in_group("waiters").size()
-	hud.set_staff(cooks, waiters, GameManager.daily_wages(_staff_profiles()))
+	var others: int = _all_staff().size() - cooks - waiters
+	hud.set_staff(cooks, waiters, others, GameManager.daily_wages(_staff_profiles()))
 
 
 # ---------------------------------------------------------------------

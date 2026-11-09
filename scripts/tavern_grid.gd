@@ -110,6 +110,11 @@ var decor: Dictionary = {}
 var _decor_of: Dictionary = {}   # every square a floor piece covers -> its anchor
 var wall_decor: Dictionary = {}
 var decor_choice: String = ""    # the piece the "decor" build tool places
+# THE PRIVATE DINING ROOM (Grand Hall only): squares painted with the
+# "private" tool. A table standing wholly on them is private: nobles are
+# seated there first, and pay and wait more there (see customer.gd).
+var private_cells: Dictionary = {}   # cell -> true
+const PRIVATE_COST: int = 40         # per square
 # table anchor -> the Customer who took it (the first of their group), or null if free
 var table_owner: Dictionary = {}
 # table cell -> {"full": plates being eaten, "dirty": empty plates left
@@ -122,6 +127,9 @@ var _bussers: Dictionary = {}        # table anchor -> the Waiter coming to clea
 #   "job":         {} when not cooking, or {"customer", "time_left", "total"}
 # }
 var hearths: Dictionary = {}
+# bar cell -> the Bartender working it, or null. They stand behind it.
+var bars: Dictionary = {}
+const DRINKS: Array[String] = ["ale", "mead", "wine"]
 
 # AStarGrid2D is Godot's built-in pathfinder for square grids. We mark
 # furniture squares as "solid" and it finds the shortest way around them.
@@ -376,6 +384,8 @@ func access_cell(furniture_cell: Vector2i, from_pos: Vector2, asker: Node = null
 			return furniture_cell + Vector2i(0, -1)
 		"expo":
 			return expo_back() if asker is Cook else expo_front()
+		"bar":
+			return bar_back(furniture_cell)
 	var start: Vector2i = cell_at_world(from_pos)
 	if start == NO_CELL:
 		start = door_cell
@@ -457,6 +467,8 @@ func standby_cell(asker: Node) -> Vector2i:
 	# outside the kitchen.
 	var cook: bool = asker is Cook
 	var anchor: Vector2 = Vector2(expo_front())
+	if asker is Waiter and asker.role == "host":
+		anchor = Vector2(door_cell)   # the host waits by the door to greet guests
 	var in_use: Dictionary = _cells_in_use(asker)
 	var choices: Array = []
 	for x in cols:
@@ -485,12 +497,25 @@ func standby_cell(asker: Node) -> Vector2i:
 
 # A free, clean table with at least `group` seats, or NO_CELL. The
 # smallest table that fits wins, so long tables stay free for parties.
-func find_free_table(group: int = 1) -> Vector2i:
+# private: "only" = private tables only, "first" = private ones if any
+# are free, "avoid" = ordinary guests stay out of the private room while
+# an ordinary table is free.
+func find_free_table(group: int = 1, private: String = "avoid") -> Vector2i:
+	if private == "first":
+		var vip: Vector2i = find_free_table(group, "only")
+		if vip != NO_CELL:
+			return vip
+	elif private == "avoid":
+		var plain: Vector2i = find_free_table(group, "never")
+		if plain != NO_CELL:
+			return plain
 	var best: Array[Vector2i] = []
 	var best_seats: int = 99
 	for anchor in table_owner:
 		var seats: int = seats_at(tables[anchor]["kind"])
 		if table_owner[anchor] != null or not _is_clean(anchor) or seats < group or seats > best_seats:
+			continue
+		if (private == "only" and not is_private_table(anchor)) or (private == "never" and is_private_table(anchor)):
 			continue
 		if seats < best_seats:
 			best.clear()
@@ -614,6 +639,56 @@ func claim_hearth(cook: Cook) -> Vector2i:
 			hearths[cell]["cook"] = cook
 			return cell
 	return NO_CELL
+
+
+# ---------------------------------------------------------------------
+# The Bar
+# ---------------------------------------------------------------------
+func bar_back(cell: Vector2i) -> Vector2i:
+	return cell + Vector2i(0, -1)
+
+
+# A Bartender asks for a Bar nobody is working. Returns its cell or NO_CELL.
+func claim_bar(bartender: Node) -> Vector2i:
+	for cell in bars:
+		if bars[cell] == bartender:
+			return cell
+	for cell in bars:
+		if not is_instance_valid(bars[cell]):
+			bars[cell] = bartender
+			return cell
+	return NO_CELL
+
+
+func release_bar(bartender: Node) -> void:
+	for cell in bars:
+		if bars[cell] == bartender:
+			bars[cell] = null
+
+
+# Is a bartender working a Bar? Then drinks go to them, not the Hearths.
+func bar_open() -> bool:
+	for cell in bars:
+		if is_instance_valid(bars[cell]):
+			return true
+	return false
+
+
+# Is a drink order waiting for a bartender?
+func take_drink_order_peek() -> bool:
+	for c in GameManager.order_queue:
+		if is_instance_valid(c) and c.state == Customer.State.WAITING_FOR_FOOD and c.order.get("id", "") in DRINKS:
+			return true
+	return false
+
+
+# The next drink order waiting, taken out of the kitchen's queue, or null.
+func take_drink_order() -> Customer:
+	for c in GameManager.order_queue:
+		if is_instance_valid(c) and c.state == Customer.State.WAITING_FOR_FOOD and c.order.get("id", "") in DRINKS:
+			GameManager.order_queue.erase(c)
+			return c
+	return null
 
 
 func release_hearth(cook: Cook) -> void:
@@ -895,7 +970,7 @@ func set_kitchen(data) -> bool:
 func get_layout() -> Array:
 	var layout: Array = []
 	for cell in furniture:
-		if furniture[cell] in ["kitchen"]:   # the pass comes with the kitchen
+		if furniture[cell] in ["kitchen", "bar"]:   # the pass comes with the kitchen
 			layout.append([cell.x, cell.y, furniture[cell]])
 	for anchor in tables:
 		var table: Dictionary = tables[anchor]
@@ -910,8 +985,10 @@ func load_layout(layout: Array, kitchen = null) -> void:
 	for cell in _props.keys():
 		_remove_prop(cell)
 	furniture.clear()
+	bars.clear()
 	tables.clear()
 	_table_of.clear()
+	private_cells.clear()
 	decor.clear()          # decorations are loaded separately (load_decor);
 	_decor_of.clear()      # moving to the Grand Hall leaves them behind
 	wall_decor.clear()
@@ -920,6 +997,7 @@ func load_layout(layout: Array, kitchen = null) -> void:
 	expo_plates.clear()
 	_apply_size()
 	var saved_hearths: Array[Vector2i] = []
+	var saved_bars: Array[Vector2i] = []
 	var old_tables: Dictionary = {}   # tables from saves before chairs: one square each
 	var new_tables: Array = []        # [kind, anchor, dir]
 	for entry in layout:
@@ -931,6 +1009,8 @@ func load_layout(layout: Array, kitchen = null) -> void:
 			continue
 		if entry[2] == "kitchen":
 			saved_hearths.append(cell)
+		elif entry[2] == "bar":
+			saved_bars.append(cell)
 		elif entry[2] in ["table", "long_table"] and entry.size() >= 4:
 			new_tables.append([entry[2], cell, Vector2i(1, 0) if entry[3] == "x" else Vector2i(0, 1)])
 		elif entry[2] == "table":
@@ -954,6 +1034,9 @@ func load_layout(layout: Array, kitchen = null) -> void:
 				break
 		if not placed:
 			GameManager.refund(floori(GameManager.FURNITURE["table"]["cost"] / 2.0))
+	for cell in saved_bars:
+		if not _blocked(cell) and not in_kitchen(cell) and cell != expo_front():
+			_place(cell, "bar")
 
 	# Hearths that were on the kitchen's line stay put; any others (old
 	# saves had them anywhere) move onto free spots on the line. Ones
@@ -1017,8 +1100,14 @@ func _try_build(cell: Vector2i) -> void:
 	if build_type == "decor":
 		_try_place_decor(cell)
 		return
+	if build_type == "private":
+		_try_paint_private(cell)
+		return
 	if _blocked(cell):
 		build_message.emit("That square is taken.")
+		return
+	if build_type == "bar" and in_kitchen(cell):
+		build_message.emit("The Bar goes in the dining room.")
 		return
 	if build_type == "kitchen" and not on_line(cell):
 		build_message.emit("Hearths go on the kitchen's front row.")
@@ -1143,6 +1232,8 @@ func _place(cell: Vector2i, type: String) -> void:
 	_set_solid(cell, true)   # nobody can walk through it now
 	if type == "kitchen":
 		hearths[cell] = {"cook": null, "job": {}}
+	elif type == "bar":
+		bars[cell] = null
 	# Its FloorProp stands at the square's middle, for y-sorting.
 	_props[cell] = _new_prop(type, cell, cell_center(cell))
 
@@ -1229,6 +1320,10 @@ func _try_remove(cell: Vector2i) -> void:
 	GameManager.refund(refund)
 	furniture.erase(cell)
 	hearths.erase(cell)
+	if bars.has(cell):
+		if is_instance_valid(bars[cell]):
+			bars[cell].release_bar_job()
+		bars.erase(cell)
 	_remove_prop(cell)
 	_set_solid(cell, false)
 	layout_changed.emit()
@@ -1238,6 +1333,38 @@ func _try_remove(cell: Vector2i) -> void:
 # ---------------------------------------------------------------------
 # Decorations
 # ---------------------------------------------------------------------
+# Painting (or unpainting) a square of the Private Dining Room.
+func _try_paint_private(cell: Vector2i) -> void:
+	if not GameManager.in_hall():
+		build_message.emit("A Private Dining Room needs the Grand Hall.")
+		return
+	if private_cells.has(cell):
+		private_cells.erase(cell)
+		GameManager.refund(PRIVATE_COST / 2)
+		queue_redraw()
+		layout_changed.emit()
+		return
+	if in_kitchen(cell) or cell == door_cell or cell == expo_front():
+		build_message.emit("The private room goes in the dining room.")
+		return
+	if not GameManager.try_spend(PRIVATE_COST):
+		build_message.emit("Not enough gold!")
+		return
+	private_cells[cell] = true
+	queue_redraw()
+	layout_changed.emit()
+
+
+# Is this table in the private room (every tabletop and chair on it)?
+func is_private_table(anchor: Vector2i) -> bool:
+	if not tables.has(anchor) or private_cells.is_empty():
+		return false
+	for cell in tables[anchor]["tops"] + tables[anchor]["chairs"]:
+		if not private_cells.has(cell):
+			return false
+	return true
+
+
 # Squares nothing new can go on: furniture, decorations and rugs.
 func _blocked(cell: Vector2i) -> bool:
 	return furniture.has(cell) or _decor_of.has(cell)
@@ -1373,7 +1500,8 @@ func get_decor() -> Dictionary:
 	for wall in wall_decor:
 		var parts: PackedStringArray = wall.split(":")
 		wall_pieces.append([parts[0], int(parts[1]), wall_decor[wall]])
-	return {"floor": floor_pieces, "wall": wall_pieces}
+	var private: Array = private_cells.keys().map(func(c): return [c.x, c.y])
+	return {"floor": floor_pieces, "wall": wall_pieces, "private": private}
 
 
 # Puts saved decorations back (after load_layout). Anything that no
@@ -1391,6 +1519,11 @@ func load_decor(data) -> void:
 				fits = false
 		if fits:
 			_place_decor(entry[2], anchor, entry.size() > 3 and int(entry[3]) == 1)
+	for entry in data.get("private", []):
+		if typeof(entry) == TYPE_ARRAY and entry.size() == 2:
+			var cell := Vector2i(int(entry[0]), int(entry[1]))
+			if _in_bounds(cell) and not in_kitchen(cell):
+				private_cells[cell] = true
 	for entry in data.get("wall", []):
 		if typeof(entry) != TYPE_ARRAY or entry.size() != 3 or not GameManager.DECOR.has(entry[2]):
 			continue
@@ -1488,6 +1621,7 @@ func _layout_works(solid: Dictionary, door: Vector2i, k_pos: Vector2i, k_width: 
 		match solid[piece]:
 			"kitchen": needs = [piece + Vector2i(0, -1)]
 			"expo": needs = [piece + Vector2i(0, -1), piece + Vector2i(0, 1)]
+			"bar": needs = [piece + Vector2i(0, -1)]   # where the bartender stands
 		for spot in needs:
 			if not reachable.has(spot):
 				return false
@@ -1526,11 +1660,18 @@ func _wants_food(guest) -> bool:
 	return is_instance_valid(guest) and guest.state == Customer.State.WAITING_FOR_FOOD
 
 
+# The next order for a Hearth. While a Bar is open, drinks are left for
+# the bartender.
 func _pop_next_order() -> Customer:
-	while not GameManager.order_queue.is_empty():
-		var c: Customer = GameManager.order_queue.pop_front()
-		if is_instance_valid(c) and c.state == Customer.State.WAITING_FOR_FOOD:
-			return c
+	var skip_drinks: bool = bar_open()
+	for c in GameManager.order_queue.duplicate():
+		if not is_instance_valid(c) or c.state != Customer.State.WAITING_FOR_FOOD:
+			GameManager.order_queue.erase(c)
+			continue
+		if skip_drinks and c.order.get("id", "") in DRINKS:
+			continue
+		GameManager.order_queue.erase(c)
+		return c
 	return null
 
 
@@ -1583,6 +1724,16 @@ func _draw() -> void:
 			else:
 				draw_colored_polygon(tile, _c("floor_a") if even else _c("floor_b"))
 			draw_polyline(tile + PackedVector2Array([tile[0]]), _c("floor_line"), 1.0)
+
+	# The private dining room: crimson carpet, with a gold rope along its
+	# edges.
+	for cell in private_cells:
+		var tile: PackedVector2Array = _diamond(cell)
+		draw_colored_polygon(tile, Color8(150, 35, 45) if (cell.x + cell.y) % 2 == 0 else Color8(138, 30, 40))
+		for i in 4:
+			var side: Vector2i = [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)][i]
+			if not private_cells.has(cell + side):
+				draw_line(tile[i], tile[(i + 1) % 4], Color8(222, 182, 70), 3.0)
 
 	# Rugs lie on the floor, under everyone.
 	for anchor in decor:
@@ -1694,6 +1845,7 @@ func draw_prop(prop: FloorProp) -> void:
 				_draw_decor_art(prop, decor[prop.cell]["id"], Vector2.ZERO, decor[prop.cell]["flip"])
 		"kitchen": _draw_hearth(prop)
 		"expo": _draw_expo(prop)
+		"bar": _draw_art(prop, BAR_ART)
 		"wall": _draw_front_wall(prop)
 
 
@@ -1703,6 +1855,7 @@ func draw_prop(prop: FloorProp) -> void:
 const TABLE_ART: Texture2D = preload("res://assets/sprites/furniture/table.png")
 const HEARTH_ART: Texture2D = preload("res://assets/sprites/furniture/hearth.png")
 const PASS_ART: Texture2D = preload("res://assets/sprites/furniture/pass.png")
+const BAR_ART: Texture2D = preload("res://assets/sprites/furniture/bar.png")
 # The long table is drawn over 2 squares on a taller frame (64 x 80,
 # middle at (32, 62)). Chairs: "back" has its backrest away from us,
 # "front" towards us.

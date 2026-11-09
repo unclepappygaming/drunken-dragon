@@ -18,6 +18,13 @@
 # IDLE (any food they were carrying is wasted). LEAVING is used when
 # the player lets them go.
 #
+# The same script runs the other front-of-house jobs (profile's role):
+#   host        greets: waits by the door (the bonus is in customer.gd)
+#   dishwasher  only clears tables; with one on staff, waiters don't
+#   bartender   works a Bar: takes drink orders from the kitchen's queue,
+#               pours, and carries the drink out:
+#               IDLE -> TO_BAR -> POURING -> CARRYING -> IDLE
+#
 # Each waiter has a profile (see staff_profiles.gd). Traits:
 #   Smooth Talker (Barkeep): guests get extra patience when ordering
 #   Nimble (Serving Maid): walks faster
@@ -26,7 +33,7 @@
 class_name Waiter
 extends Walker
 
-enum State { IDLE, TO_GUEST, TAKING_ORDER, TO_PASS, CARRYING, TO_TABLE, CLEARING, RETURNING, LEAVING }
+enum State { IDLE, TO_GUEST, TAKING_ORDER, TO_PASS, CARRYING, TO_TABLE, CLEARING, RETURNING, TO_BAR, POURING, LEAVING }
 
 const WALK_SPEED: float = 220.0
 const ORDER_TAKE_TIME: float = 1.0
@@ -35,6 +42,7 @@ const SMOOTH_TALK_PATIENCE: float = 10.0
 const LUCKY_CHANCE: float = 1.0 / 3.0
 const LUCKY_TIP: float = 0.5
 const TRAY_SIZE: float = 0.75   # dishes on the tray are drawn a bit smaller
+const POUR_TIME: float = 1.5
 
 var state: State = State.IDLE
 
@@ -43,6 +51,8 @@ var _table: Vector2i = TavernGrid.NO_CELL   # the table we're clearing
 var _pause: float = 0.0   # after a job we couldn't reach: wait before the next
 var _timer: float = 0.0
 var profile: Dictionary = {}
+var role: String = "waiter"                 # "waiter", "host", "dishwasher" or "bartender"
+var _bar: Vector2i = TavernGrid.NO_CELL     # a bartender's Bar
 
 
 func setup(tavern_grid: TavernGrid, start_pos: Vector2, who: Dictionary) -> void:
@@ -56,7 +66,8 @@ func setup(tavern_grid: TavernGrid, start_pos: Vector2, who: Dictionary) -> void
 	material = StaffProfiles.material_for(profile)
 	# Pixel art stays crisp instead of blurry when scaled up.
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	add_to_group("waiters")
+	role = StaffProfiles.role_of(profile)
+	add_to_group(role + "s")   # "waiters", "hosts", "dishwashers", "bartenders"
 
 
 func _process(delta: float) -> void:
@@ -71,8 +82,9 @@ func _process(delta: float) -> void:
 			_pause -= delta
 			if _pause <= 0.0:
 				_find_task()
-			if state == State.IDLE:
+			if state == State.IDLE and not (role == "bartender" and _bar != TavernGrid.NO_CELL):
 				idle_standby(delta)   # nothing to do: wait inside, out of the way
+				# (a bartender with a Bar stays behind it instead)
 
 		State.TO_GUEST:
 			if not _guest_is(Customer.State.WAITING_FOR_WAITER):
@@ -133,6 +145,28 @@ func _process(delta: float) -> void:
 			if _walk(delta):
 				state = State.IDLE   # handed in at the pass for washing
 
+		State.TO_BAR:
+			if not grid.bars.has(_bar):
+				release_bar_job()
+			elif _walk(delta):
+				face_toward(grid.cell_center(_bar))
+				_guest = grid.take_drink_order()
+				if _guest == null:
+					state = State.IDLE
+				else:
+					GameManager.buy_ingredients(_guest.order)
+					state = State.POURING
+					_timer = POUR_TIME
+
+		State.POURING:
+			if not _guest_is(Customer.State.WAITING_FOR_FOOD):
+				_give_up()
+			else:
+				_timer -= delta
+				if _timer <= 0.0:
+					go_to_cell(grid.access_cell(_guest.table_cell, position, self))
+					state = State.CARRYING
+
 		State.LEAVING:
 			if _walk(delta):
 				queue_free()
@@ -142,7 +176,8 @@ func _process(delta: float) -> void:
 
 # Called by main.gd when the player lets this waiter go.
 func leave() -> void:
-	remove_from_group("waiters")
+	remove_from_group(role + "s")
+	grid.release_bar(self)
 	grid.release_busser(self)
 	grid.release_plate_claim(self)
 	state = State.LEAVING
@@ -150,6 +185,15 @@ func leave() -> void:
 
 
 func _find_task() -> void:
+	match role:
+		"host":
+			return   # waits by the door (see standby_cell)
+		"bartender":
+			_find_bar_task()
+			return
+		"dishwasher":
+			_find_dirty_table()
+			return
 	# Finished food first.
 	if grid.claim_ready_plate(self):
 		end_standby()
@@ -165,13 +209,39 @@ func _find_task() -> void:
 		state = State.TO_GUEST
 		return
 
-	# Nothing else to do: clear a table guests have left.
+	# Nothing else to do: clear a table guests have left (unless that's
+	# the dishwashers' job).
+	if get_tree().get_nodes_in_group("dishwashers").is_empty():
+		_find_dirty_table()
+
+
+func _find_dirty_table() -> void:
 	var table: Vector2i = grid.claim_dirty_table(self)
 	if table != TavernGrid.NO_CELL:
 		end_standby()
 		_table = table
 		go_to_cell(grid.access_cell(table, position, self))
 		state = State.TO_TABLE
+
+
+# A bartender goes to their Bar and pours whatever drink is waiting.
+func _find_bar_task() -> void:
+	_bar = grid.claim_bar(self)
+	if _bar == TavernGrid.NO_CELL:
+		return   # no Bar free: waits around
+	var spot: Vector2i = grid.bar_back(_bar)
+	if current_cell() != spot or grid.take_drink_order_peek():
+		end_standby()
+		go_to_cell(spot)
+		state = State.TO_BAR
+
+
+# Our Bar was sold: find another (or wait).
+func release_bar_job() -> void:
+	grid.release_bar(self)
+	_bar = TavernGrid.NO_CELL
+	if state in [State.TO_BAR, State.POURING]:
+		_give_up()
 
 
 func _give_up() -> void:

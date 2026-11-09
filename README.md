@@ -99,8 +99,13 @@ finger to look around and pinch to zoom (mouse drag and wheel on a computer).
 
 The bottom bar has four buttons:
 
-- **Build** opens a tray: Table, Long Table, Rotate, Hearth, Sell, Door,
-  Move Kitchen and Expand. You can't
+- **Build** opens a tray: Table, Long Table, Rotate, Hearth, Bar, Sell,
+  Door, Move Kitchen, Private Room, Decor, Expand.
+  - **Bar** (300g): a counter for a bartender, who stands behind it.
+  - **Private Room** (Grand Hall only, 40g a square): paint squares with a
+    crimson carpet. A table standing wholly on it is private: nobles are
+    seated there first, and nobles at a private table pay 30% more and are
+    30% more patient. Ordinary guests only use it when nothing else is free. You can't
   block the doorway or wall anyone in.
   - **Door** moves the front door to any square along a wall (100g, between
     days). The waiting line follows it.
@@ -141,7 +146,14 @@ The bottom bar has four buttons:
 
     Decorations stay behind when you move to the Grand Hall; earned
     trophies come along and can be hung again.
-- **Staff** opens a tray: **Hire Cook**, **Hire Waiter** (three new
+- **Staff** opens a tray with a button per job. Besides cooks and waiters:
+
+  | Job | Trait | Wage | How many |
+  | --- | --- | --- | --- |
+  | Host | Guests in line wait twice as long; every guest sits down with 10s more patience | 28g | 1 |
+  | Dishwasher | Clears and washes every table, so waiters only take orders and serve | 20g | up to 3 |
+  | Bartender | Works a Bar: pours every drink (ale, mead, wine) and carries it out, so drinks skip the kitchen | 32g | one per Bar |
+- **Staff** tray details: **Hire Cook**, **Hire Waiter** (three new
   applicants each day) and **Your Staff** (let someone go). Between days
   only. Hiring costs a signing fee of 4 days' wages up front, then wages
   are paid every night. Every staff member has a name, their own look, and

@@ -151,8 +151,9 @@ func show_message(text: String, seconds: float = 2.0) -> void:
 	_message_time_left = seconds
 
 
-func set_staff(cooks: int, waiters: int, wages: int) -> void:
-	_staff_label.text = "Cooks %d  Waiters %d  Wages %dg/day" % [cooks, waiters, wages]
+# `others`: hosts, dishwashers and bartenders, shown as "+2".
+func set_staff(cooks: int, waiters: int, others: int, wages: int) -> void:
+	_staff_label.text = "Cooks %d  Waiters %d%s  Wages %dg/day" % [cooks, waiters, "  +%d" % others if others > 0 else "", wages]
 
 
 # The summary card. Continue just closes it; the day starts from the
@@ -265,6 +266,8 @@ func _select_tool(type: String) -> void:
 			_set_hint("Tap the middle square: %s, %d seats (%dg)" % [
 				info["name"], TavernGrid.seats_at(type), info["cost"]])
 		"kitchen": _set_hint("Tap the kitchen's front row: Hearth (%dg)" % GameManager.FURNITURE["kitchen"]["cost"])
+		"bar": _set_hint("Tap a square: Bar (%dg). The bartender stands behind it." % GameManager.FURNITURE["bar"]["cost"])
+		"private": _set_hint("Grand Hall: tap squares for the private room (%dg each); tap again to undo" % TavernGrid.PRIVATE_COST)
 		"kitchen_move": _set_hint("Tap where the kitchen's back-left corner should go")
 		"remove":  _set_hint("Tap furniture to sell it (half price), or a wall piece to take it down")
 		"decor":
@@ -480,12 +483,13 @@ func _build_trays() -> void:
 	_solid(build_panel, Color(0.2, 0.16, 0.12))
 	_build_tray = build_panel
 	var build_row := GridContainer.new()
-	build_row.columns = 5
+	build_row.columns = 6
 	build_panel.add_child(build_row)
 	var cost := func(type: String) -> String: return "%dg" % GameManager.FURNITURE[type]["cost"]
 	var tools: Array = [["Table\n" + cost.call("table"), "table"], ["Long Table\n" + cost.call("long_table"), "long_table"],
-			["Hearth\n" + cost.call("kitchen"), "kitchen"], ["Sell", "remove"],
-			["Door\n%dg" % TavernGrid.DOOR_COST, "door"], ["Move\nKitchen", "kitchen_move"]]
+			["Hearth\n" + cost.call("kitchen"), "kitchen"], ["Bar\n" + cost.call("bar"), "bar"], ["Sell", "remove"],
+			["Door\n%dg" % TavernGrid.DOOR_COST, "door"], ["Move\nKitchen", "kitchen_move"],
+			["Private\nRoom", "private"]]
 	for entry in tools:
 		var button := _make_button(entry[0], 21, build_row, 86)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -515,11 +519,11 @@ func _build_trays() -> void:
 	_staff_tray = staff_panel
 	var staff_row := HBoxContainer.new()
 	staff_panel.add_child(staff_row)
-	var hire_cook := _make_button("Hire\nCook", 22, staff_row, 86)
-	hire_cook.pressed.connect(_open_people.bind("cook"))
-	var hire_waiter := _make_button("Hire\nWaiter", 22, staff_row, 86)
-	hire_waiter.pressed.connect(_open_people.bind("waiter"))
-	var team := _make_button("Your\nStaff", 22, staff_row, 86)
+	# One button per job: tap it to see today's applicants.
+	for job in [["Cook", "cook"], ["Waiter", "waiter"], ["Host", "host"], ["Dish-\nwasher", "dishwasher"], ["Bar-\ntender", "bartender"]]:
+		var hire := _make_button(job[0], 20, staff_row, 76)
+		hire.pressed.connect(_open_people.bind(job[1]))
+	var team := _make_button("Your\nStaff", 20, staff_row, 76)
 	team.pressed.connect(staff_list_requested.emit)
 
 	_build_tray.visible = false
@@ -835,7 +839,8 @@ func _refresh_people() -> void:
 	if _people_mode == "staff":
 		_people_title.text = "Your Staff"
 	else:
-		_people_title.text = "Looking for work: %s" % ("Cooks" if _people_mode == "cook" else "Waiters")
+		var jobs: Dictionary = {"cook": "Cooks", "waiter": "Waiters", "host": "Hosts", "dishwasher": "Dishwashers", "bartender": "Bartenders"}
+		_people_title.text = "Looking for work: %s" % jobs[_people_mode]
 	if people.is_empty():
 		var none := _make_label(22)
 		none.text = "Nobody else is looking for work today. Come back tomorrow."

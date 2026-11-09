@@ -214,6 +214,24 @@ def chair(back):
     return p.finish()
 
 
+def bar_counter():
+    """The Bar: a dark-topped counter with brass taps and a couple of
+    mugs. The bartender stands behind it (the -y side)."""
+    p = Piece()
+    p.shadow(11)
+    p.box(-11, -8, 0, 11, 8, 13, OAK, shade(OAK, 0.85), shade(OAK, 0.68))
+    for x in range(-8, 11, 5):   # panels on the front
+        p.line(P(x, 8, 2), P(x, 8, 11), OAK_DARK)
+    p.line(P(-11, 8, 4), P(11, 8, 4), (200, 160, 70, 255))     # brass foot rail
+    p.box(-12, -9, 13, 12, 9, 15, (95, 60, 35, 255))           # dark polished top
+    for x in (-6, 0, 6):                                        # taps along the back
+        p.box(x - 1, -7, 15, x + 1, -5, 22, (210, 170, 70, 255), edge=False)
+        p.box(x - 2, -6, 21, x + 2, -4, 23, (230, 195, 90, 255), edge=False)
+    mug(p, -5, 4, 15)
+    mug(p, 6, 3, 15)
+    return p.finish()
+
+
 def table_barrel():
     """An ale barrel standing on end, used as a table."""
     p = Piece()
@@ -451,6 +469,7 @@ if __name__ == "__main__":
         hearth.paste(hearth_stove(f, lit=True), (FW * (f + 1), 0))
     hearth.save(os.path.join(out, "hearth.png"))
     pass_window().save(os.path.join(out, "pass.png"))
+    bar_counter().save(os.path.join(out, "bar.png"))
 
     rows = [
         ("Chosen furniture", [("Plank trestle table", table_scene(table_trestle())),

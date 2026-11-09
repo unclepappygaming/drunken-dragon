@@ -54,6 +54,8 @@ const FURNITURE: Dictionary = {
 	# 3 x 2 and seats 4. Each group of guests takes a whole table.
 	"table": {"name": "Table", "cost": 100, "color": Color(0.55, 0.36, 0.2)},
 	"long_table": {"name": "Long Table", "cost": 220, "color": Color(0.55, 0.36, 0.2)},
+	# A Bar: a bartender stands behind it (the -y side) and pours drinks.
+	"bar": {"name": "Bar", "cost": 300, "color": Color(0.4, 0.25, 0.15)},
 	"kitchen": {"name": "Hearth", "cost": 250, "color": Color(0.7, 0.25, 0.15)},
 }
 
@@ -560,7 +562,7 @@ func applicants(role: String) -> Array:
 	if _applicants_day != day:
 		_applicants_day = day
 		_applicants = {}
-		for job in ["cook", "waiter"]:
+		for job in StaffProfiles.ROLES:
 			var people: Array = []
 			for i in APPLICANTS_PER_ROLE:
 				people.append(StaffProfiles.random_profile(job))

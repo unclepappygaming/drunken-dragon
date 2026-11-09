@@ -51,7 +51,30 @@ const TYPES: Dictionary = {
 		"hair_key": Color8(95, 60, 35),
 		"names": ["Pip", "Tansy", "Rosie", "Tobo", "Lily", "Fennick"],
 	},
+	"host": {
+		"role": "host", "title": "Host", "wage": 28,
+		"trait": "Warm Welcome", "about": "Guests in line wait twice as long, and every guest sits down with 10 more seconds of patience.",
+		"hair_key": Color8(60, 40, 30),
+		"names": ["Aldric", "Beatrix", "Cedric", "Isolde", "Lorne", "Wren"],
+	},
+	"dishwasher": {
+		"role": "dishwasher", "title": "Dishwasher", "wage": 20,
+		"trait": "Elbow Grease", "about": "Clears tables and washes up, so waiters only take orders and serve.",
+		"hair_key": Color8(140, 90, 50),
+		"names": ["Hob", "Moll", "Dunny", "Peg", "Wat", "Sukey"],
+	},
+	"bartender": {
+		"role": "bartender", "title": "Bartender", "wage": 32,
+		"trait": "Quick Pour", "about": "Works a Bar: pours every drink and carries it out, so drinks never wait on the kitchen.",
+		"hair_key": Color8(50, 35, 25),
+		"names": ["Barnaby", "Ottilie", "Quill", "Hester", "Rufus", "Della"],
+	},
 }
+
+# Every job, in the order the Staff tray lists them. Cooks and waiters are
+# needed to run the tavern; the others are extras.
+const ROLES: Array[String] = ["cook", "waiter", "host", "dishwasher", "bartender"]
+const ESSENTIAL: Array[String] = ["cook", "waiter"]
 
 # Dishes the Dwarf Cook's Roast Master trait speeds up.
 const ROAST_DISHES: Array[String] = ["boar", "wings", "phoenix", "feast"]
@@ -77,6 +100,9 @@ const SHEETS: Dictionary = {
 	"barkeep": preload("res://assets/sprites/staff/barkeep.png"),
 	"maid": preload("res://assets/sprites/staff/maid.png"),
 	"halfling": preload("res://assets/sprites/staff/halfling.png"),
+	"host": preload("res://assets/sprites/staff/host.png"),
+	"dishwasher": preload("res://assets/sprites/staff/dishwasher.png"),
+	"bartender": preload("res://assets/sprites/staff/bartender.png"),
 }
 const FRAME_SIZE: Vector2i = Vector2i(32, 40)
 
