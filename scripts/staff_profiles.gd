@@ -132,7 +132,47 @@ static func clean(profile, role: String) -> Dictionary:
 		"name": str(profile.get("name", "Someone")),
 		"skin": clampi(int(profile.get("skin", 1)), 0, SKIN_TONES.size() - 1),
 		"hair": clampi(int(profile.get("hair", 2)), 0, HAIR_COLORS.size() - 1),
+		"xp": maxi(0, int(profile.get("xp", 0))),
 	}
+
+
+# STAFF LEVELS: staff gain experience (xp) for every job done (a dish
+# cooked, an order taken, a plate served, a table cleared...). Each level
+# above 1 makes them LEVEL_SPEED faster at walking and working, and their
+# wage goes up by LEVEL_WAGE, so a seasoned crew is worth keeping.
+const LEVEL_XP: Array[int] = [0, 40, 120, 250, 450]   # xp needed for level 1, 2, 3, 4, 5
+const LEVEL_SPEED: float = 0.06
+const LEVEL_WAGE: float = 0.08
+
+
+static func level(profile: Dictionary) -> int:
+	var xp: int = int(profile.get("xp", 0))
+	var lvl: int = 1
+	for i in LEVEL_XP.size():
+		if xp >= LEVEL_XP[i]:
+			lvl = i + 1
+	return lvl
+
+
+# How much faster than a beginner they are (1.0 at level 1).
+static func level_bonus(profile: Dictionary) -> float:
+	return 1.0 + LEVEL_SPEED * (level(profile) - 1)
+
+
+# Adds experience. Returns true if they just reached a new level.
+static func add_xp(profile: Dictionary, amount: int = 1) -> bool:
+	var before: int = level(profile)
+	profile["xp"] = int(profile.get("xp", 0)) + amount
+	return level(profile) > before
+
+
+# Progress towards the next level, e.g. "12/45 xp", or "Max level".
+static func xp_text(profile: Dictionary) -> String:
+	var lvl: int = level(profile)
+	if lvl >= LEVEL_XP.size():
+		return "Max level"
+	var xp: int = int(profile.get("xp", 0))
+	return "%d/%d xp" % [xp - LEVEL_XP[lvl - 1], LEVEL_XP[lvl] - LEVEL_XP[lvl - 1]]
 
 
 static func role_of(profile: Dictionary) -> String:
@@ -140,7 +180,7 @@ static func role_of(profile: Dictionary) -> String:
 
 
 static func wage(profile: Dictionary) -> int:
-	return TYPES[profile["type"]]["wage"]
+	return roundi(TYPES[profile["type"]]["wage"] * (1.0 + LEVEL_WAGE * (level(profile) - 1)))
 
 
 # What it costs up front to hire someone: a signing fee of a few days' pay.

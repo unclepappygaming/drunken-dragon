@@ -56,21 +56,25 @@ def ellipse(img, cx, cy, rx, ry, c, top_only=False, below=None):
                 px(img, x, y, c)
 
 
-def outline(img):
-    """Adds a 1px outline around everything that isn't the shadow."""
+def outline(img, color=OUTLINE, thick=False):
+    """Adds a 1px outline around everything that isn't the shadow.
+    thick: a second pixel on the lower and right sides, like a sticker."""
     src = img.copy()
+    dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    if thick:
+        dirs += ((-2, 0), (0, -2), (-1, -1))   # reaching back to the shape: the outline grows down and right
     for y in range(H):
         for x in range(W):
             if src.getpixel((x, y))[3] > 100:
                 continue
-            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            for dx, dy in dirs:
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < W and 0 <= ny < H and src.getpixel((nx, ny))[3] > 100:
-                    img.putpixel((x, y), OUTLINE)
+                    img.putpixel((x, y), color)
                     break
 
 
-def shade_pass(img, keep):
+def shade_pass(img, keep, light=1.15, dark=0.8):
     """Light from the upper left: pixels on an upper or left edge get
     lighter, lower or right edges darker, and a thin shadow falls under
     anything drawn over something else. Skin and hair are left alone:
@@ -88,15 +92,56 @@ def shade_pass(img, keep):
                 continue
             up, left, down, right = at(x, y - 1), at(x - 1, y), at(x, y + 1), at(x + 1, y)
             if up[3] < 100 or left[3] < 100:
-                img.putpixel((x, y), shade(c, 1.15))
+                img.putpixel((x, y), shade(c, light))
             elif down[3] < 100 or right[3] < 100:
-                img.putpixel((x, y), shade(c, 0.8))
+                img.putpixel((x, y), shade(c, dark))
             elif up[3] >= 200 and up[:3] != c[:3] and up not in keep and sum(up[:3]) < sum(c[:3]):
                 img.putpixel((x, y), shade(c, 0.88))   # shadow under a darker piece above
 
 
 def shade(c, f):
-    return (int(c[0] * f), int(c[1] * f), int(c[2] * f), 255)
+    return (min(255, int(c[0] * f)), min(255, int(c[1] * f)), min(255, int(c[2] * f)), 255)
+
+
+def saturate(c, f):
+    """Pushes a colour away from grey by f (1 = unchanged)."""
+    g = (c[0] + c[1] + c[2]) / 3
+    return tuple(max(0, min(255, int(g + (v - g) * f))) for v in c[:3]) + (c[3],)
+
+
+BOLD_OUTLINE = (24, 14, 12, 255)
+
+
+def bold_pass(img, keep, level):
+    """Bolder look, before the outline goes on.
+    1: richer colours, and dark lines where one piece meets another
+       (sleeve against body, hat against hair...).
+    3: as 1, with stronger light and shade, and eyebrows (see draw)."""
+    src = img.copy()
+
+    def at(x, y):
+        if 0 <= x < W and 0 <= y < H:
+            return src.getpixel((x, y))
+        return (0, 0, 0, 0)
+
+    def far(a, b):
+        return sum(abs(a[i] - b[i]) for i in range(3)) > 120
+    for y in range(H):
+        for x in range(W):
+            c = src.getpixel((x, y))
+            if c[3] < 200:
+                continue
+            if c not in keep:
+                c = saturate(c, 1.3)
+                img.putpixel((x, y), c)
+            # Inner line on the lower/right side of a boundary between two
+            # clearly different pieces (never through a face or the eyes).
+            if c in keep:
+                continue
+            for n in (at(x, y - 1), at(x - 1, y)):
+                if n[3] >= 200 and n not in keep and far(n, c) and sum(n[:3]) > sum(c[:3]):
+                    img.putpixel((x, y), shade(c, 0.5))
+                    break
 
 
 # ---------------------------------------------------------------------
@@ -204,6 +249,23 @@ def draw(ch, view="front", step=0):
         px(img, 19, head_cy + 1, EYE); px(img, 19, head_cy + 2, EYE)
         px(img, 21, head_cy + 2, SKIN)       # little nose
         px(img, 18, head_cy + 3, BLUSH)
+    if ch.get("bold", 0) >= 3:
+        # Bigger, livelier eyes with a glint, and eyebrows.
+        brow, glint = (70, 44, 34, 255), (255, 255, 255, 255)
+        if view == "front":
+            for ex in (12, 18):
+                rect(img, ex, head_cy + 1, ex + 1, head_cy + 2, EYE)
+                px(img, ex, head_cy + 1, glint)
+                rect(img, ex, head_cy - 1, ex + 1, head_cy - 1, brow)
+        elif view == "quarter":
+            for ex in (14, 19):
+                rect(img, ex, head_cy + 1, ex + 1, head_cy + 2, EYE)
+                px(img, ex, head_cy + 1, glint)
+                rect(img, ex, head_cy - 1, ex + 1, head_cy - 1, brow)
+        elif view == "side":
+            rect(img, 19, head_cy + 1, 20, head_cy + 2, EYE)
+            px(img, 20, head_cy + 1, glint)
+            rect(img, 19, head_cy - 1, 20, head_cy - 1, brow)
     for layer in ch.get("head_layers", []):
         layer(img, base, head_cy)
     if view == "quarter_back":
@@ -218,9 +280,13 @@ def draw(ch, view="front", step=0):
     for layer in ch.get("extras", []):
         layer(img, base, body_y0, body_y1, head_cy)
 
+    keep = [SKIN, SKIN_DARK, BLUSH, EYE, ch.get("hair_key")]
+    bold = ch.get("bold", 0)
     if ch.get("shade"):
-        shade_pass(img, [SKIN, SKIN_DARK, BLUSH, EYE, ch.get("hair_key")])
-    outline(img)
+        shade_pass(img, keep, 1.3 if bold >= 3 else 1.15, 0.68 if bold >= 3 else 0.8)
+    if bold:
+        bold_pass(img, keep, bold)
+    outline(img, BOLD_OUTLINE if bold else OUTLINE, thick=bold == 2)
     # Shadow goes under everything, after the outline.
     shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ellipse(shadow, 16, 30, 7, 1.8, SHADOW)
@@ -617,12 +683,17 @@ def hair_colour(ch):
     return None
 
 
+# The look every character is exported in: bold lines, rich colour and the
+# chunky "sticker" outline (option B in bold_options.png). 0 = the old look.
+BOLD = 2
+
+
 def detailed_staff(name, ch):
-    return dict(ch, shade=True, hair_key=HAIR_KEYS[name], extras=DETAILS[name])
+    return dict(ch, shade=True, hair_key=HAIR_KEYS[name], extras=DETAILS[name], bold=BOLD)
 
 
 def detailed_guest(name, ch):
-    return dict(ch, shade=True, hair_key=hair_colour(ch), extras=GUEST_DETAILS.get(name, []))
+    return dict(ch, shade=True, hair_key=hair_colour(ch), extras=GUEST_DETAILS.get(name, []), bold=BOLD)
 
 
 def quarter_options(path):
@@ -650,6 +721,37 @@ def quarter_options(path):
         for i, pic in enumerate(new):
             sheet_img.alpha_composite(pic.resize((W * Z, H * Z), Image.NEAREST), (150 + cw + 30 + i * (W * Z + gap), y0))
     sheet_img.save(path)
+
+
+def bold_options(path):
+    """Staff and guests as now, and three bolder looks, zoomed in and at
+    game size."""
+    from PIL import ImageFont
+    font = ImageFont.load_default(size=15)
+    cast = [(n.split(". ")[1], detailed_staff(n, c)) for n, c in list(COOKS.items())[:2] + list(WAITERS.items())[:2]]
+    cast += [(n.title(), detailed_guest(n, c)) for n, c in GUESTS.items() if n in ("farmer", "guard", "knight", "lady", "mage")]
+    looks = [("As now", 0), ("A  Bold lines + rich colour", 1), ("B  A + chunky sticker outline", 2),
+             ("C  A + strong shading + big eyes", 3)]
+    Z, gap = 3, 4
+    cw = (W * Z + gap) * 2 + W * 2 + 24
+    out = Image.new("RGBA", (130 + cw * len(looks), 34 + len(cast) * (H * Z + 10)), (60, 54, 48, 255))
+    d = ImageDraw.Draw(out)
+    for i, (label, _) in enumerate(looks):
+        d.text((130 + i * cw + 4, 8), label, fill=(250, 230, 180), font=font)
+    floor = (196, 142, 86, 255)
+    for r, (name, ch) in enumerate(cast):
+        y0 = 34 + r * (H * Z + 10)
+        d.text((8, y0 + H * Z // 2 - 8), name, fill=(240, 240, 235), font=font)
+        for i, (_, lvl) in enumerate(looks):
+            c = dict(ch, bold=lvl)
+            x0 = 130 + i * cw
+            for k, pic in enumerate([draw(c, "front", 0), draw(c, "side", 1)]):
+                out.alpha_composite(pic.resize((W * Z, H * Z), Image.NEAREST), (x0 + k * (W * Z + gap), y0))
+            # at game size (2x) on a wooden floor
+            tile = Image.new("RGBA", (W * 2 + 8, H * 2), floor)
+            tile.alpha_composite(draw(c, "front", 0).resize((W * 2, H * 2), Image.NEAREST), (4, 0))
+            out.alpha_composite(tile, (x0 + 2 * (W * Z + gap), y0 + H * Z - H * 2))
+    out.save(path)
 
 
 def detail_options(path):
@@ -1089,5 +1191,6 @@ if __name__ == "__main__":
            ("Waiters", {k: detailed_staff(k, v) for k, v in WAITERS.items()})], os.path.join(here, "staff_options.png"))
     detail_options(os.path.join(here, "staff_detail_options.png"))
     quarter_options(os.path.join(here, "quarter_options.png"))
+    bold_options(os.path.join(here, "bold_options.png"))
     sheet([("Guests", {k.title(): detailed_guest(k, v) for k, v in GUESTS.items()})], os.path.join(here, "guest_options.png"))
     print("wrote previews")

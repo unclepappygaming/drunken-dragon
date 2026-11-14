@@ -34,8 +34,8 @@ var _dish: Customer = null   # the guest whose plate we're carrying
 
 func setup(tavern_grid: TavernGrid, start_pos: Vector2, who: Dictionary) -> void:
 	_setup_walker(tavern_grid, start_pos)
-	speed = WALK_SPEED
 	profile = who
+	speed = WALK_SPEED * StaffProfiles.level_bonus(profile)
 	sprite_sheet = StaffProfiles.SHEETS[profile["type"]]
 	material = StaffProfiles.material_for(profile)
 	# Pixel art stays crisp instead of blurry when scaled up.
@@ -49,13 +49,21 @@ func setup(tavern_grid: TavernGrid, start_pos: Vector2, who: Dictionary) -> void
 #   Trained (Classic Chef): everything 25% faster
 #   Roast Master (Dwarf Cook): roasts 40% faster
 func cook_speed(order: Dictionary) -> float:
+	var trait_speed: float = 1.0
 	match profile["type"]:
 		"chef":
-			return 1.25
+			trait_speed = 1.25
 		"dwarf_cook":
 			if StaffProfiles.ROAST_DISHES.has(order.get("id", "")):
-				return 1.4
-	return 1.0
+				trait_speed = 1.4
+	return trait_speed * StaffProfiles.level_bonus(profile)   # and faster with every level
+
+
+# Experience for a job done; at a new level they get quicker.
+func gain_xp(amount: int = 1) -> void:
+	if StaffProfiles.add_xp(profile, amount):
+		speed = WALK_SPEED * StaffProfiles.level_bonus(profile)
+		GameManager.staff_levelled.emit(profile)
 
 
 # Extra share of the price for dishes this cook makes.
@@ -96,6 +104,7 @@ func _process(delta: float) -> void:
 				_back_to_work()
 			elif grid.expo_has_room():
 				grid.put_on_expo(_dish)
+				gain_xp(2)   # a whole dish: worth an order, a serve and a clear-up
 				_dish = null
 				_back_to_work()
 			# Otherwise the pass is full: wait for a waiter to clear it.

@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.dont_write_bytecode = True
 from PIL import Image  # noqa: E402
 from make_sprites import (  # noqa: E402
+    BOLD,
     W, H, SKIN, GOLD, WOOD, STEEL, px, rect, ellipse, shade, sheet, hair, beard, beret, mustache, draw, tray,
     wizard_hat, magic_staff, belt, buttons, apron, vest, bandana, neckerchief, marks, towel,
     rolled_sleeves, watch_chain, hair_colour,
@@ -268,7 +269,7 @@ NEW_STAFF = {
 
 def shaded(group):
     """The same shading as the other characters (skin and hair left alone)."""
-    return {name: dict(ch, shade=True, hair_key=hair_colour(ch)) for name, ch in group.items()}
+    return {name: dict(ch, shade=True, hair_key=hair_colour(ch), bold=BOLD) for name, ch in group.items()}
 
 
 # Ids the game uses for each sheet.

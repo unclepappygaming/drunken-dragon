@@ -68,6 +68,9 @@ func _ready() -> void:
 	hud.skip_ahead_requested.connect(_on_skip_ahead)
 	hud.grid = grid
 	grid.piece_selected.connect(hud.show_piece_popup)
+	GameManager.staff_levelled.connect(_on_staff_levelled)
+	hud.settings_changed.connect(func(): scenery.set_style(Scenery.style_for_location()))
+	GameManager.request_done.connect(_on_request_done)
 	# You can connect a signal straight to another node's function.
 	grid.build_message.connect(hud.show_message)
 	camera.tapped.connect(grid.handle_tap)
@@ -188,6 +191,9 @@ func _on_day_start_requested(banquet: bool) -> void:
 				_fae_arrivals.append(start + i * 20.0)   # 18:00 to 19:40
 	if GameManager.today_event != "":
 		hud.show_message(GameManager.EVENTS[GameManager.today_event]["text"], 6.0)
+	if not GameManager.today_requests.is_empty():
+		var asks: Array = GameManager.today_requests.map(func(r): return r["text"])
+		hud.show_message("Today's requests: %s. (Recipes & Goals)" % "; ".join(asks), 7.0)
 	if banquet:
 		# Spread the party evenly between BANQUET_START and BANQUET_END.
 		var party: int = GameManager.banquet_party_size()
@@ -379,6 +385,7 @@ func _on_customer_left(customer: Customer, _happy: bool) -> void:
 			GameManager.record_served(customer.order["id"], customer.is_noble, customer.guest_type)
 		"impatient":
 			GameManager.today_walkouts += 1
+			GameManager.note_walkout()
 		"no_dish":
 			GameManager.today_disappointed += 1
 		"gave_up_line":
@@ -688,6 +695,21 @@ func _all_staff() -> Array:
 	for role in StaffProfiles.ROLES:
 		everyone += get_tree().get_nodes_in_group(role + "s")
 	return everyone
+
+
+func _on_staff_levelled(profile: Dictionary) -> void:
+	var lvl: int = StaffProfiles.level(profile)
+	hud.show_message("%s reached level %d! Faster now (wage %dg/day)." % [profile["name"], lvl, StaffProfiles.wage(profile)], 4.0)
+	GameManager.today_news.append("%s reached level %d." % [profile["name"], lvl])
+	_update_staff_display()
+
+
+func _on_request_done(request: Dictionary) -> void:
+	var reward: String = "+%dg" % request["gold"]
+	if request["fame"] > 0:
+		reward += ", +%d fame" % request["fame"]
+	hud.show_message("Request done: %s! (%s)" % [request["text"], reward], 4.0)
+	GameManager.today_news.append("Request done: %s (%s)." % [request["text"], reward])
 
 
 func _staff_profiles() -> Array:

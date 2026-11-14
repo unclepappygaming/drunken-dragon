@@ -34,6 +34,7 @@ signal move_requested   # move to the Grand Hall (after a second tap)
 # Legendary, fully expanded tavern, ready to move to the Grand Hall.
 # It's on in the web test build only; phone apps never have it.
 signal skip_ahead_requested
+signal settings_changed   # scenery or speed changed in the Settings card
 const TEST_SHORTCUT: bool = true
 
 const TOP_HEIGHT: int = 150
@@ -63,6 +64,9 @@ var _new_game_button: Button
 var _new_game_armed: bool = false   # true after the first tap
 var _move_armed: bool = false       # the same for moving to the Grand Hall
 var _gold_taps: Array[int] = []     # times of recent taps on the gold (msec)
+var _settings_panel: PanelContainer
+var _settings_box: VBoxContainer
+var _settings_reset_armed: bool = false
 # The pop-up over a tapped piece in Build mode: Move, Turn, Sell.
 var _piece_popup: PanelContainer
 var _piece_title: Label
@@ -108,6 +112,7 @@ func _ready() -> void:
 	_build_people_panel()
 	_build_decor_panel()
 	_build_piece_popup()
+	_build_settings_panel()
 
 	# CONNECTING SIGNALS: "when GameManager emits gold_changed, run my
 	# _on_gold_changed function". The signal passes along the new amount.
@@ -289,6 +294,100 @@ func _select_tool(type: String) -> void:
 			else:
 				_set_hint("Tap a square: %s (%dg). Tap it after to turn it." % [piece["name"], piece["cost"]])
 		"door":    _set_hint("Tap a square along a wall to move the door (%dg)" % TavernGrid.DOOR_COST)
+
+
+# ---------------------------------------------------------------------
+# Settings: scenery, game speed, and starting over
+# ---------------------------------------------------------------------
+func _build_settings_panel() -> void:
+	_settings_panel = PanelContainer.new()
+	add_child(_settings_panel)
+	_settings_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_settings_panel.offset_left = -300
+	_settings_panel.offset_right = 300
+	_settings_panel.offset_top = -330
+	_settings_panel.offset_bottom = 330
+	_settings_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_settings_panel.visible = false
+	_solid(_settings_panel)
+	_settings_box = VBoxContainer.new()
+	_settings_box.add_theme_constant_override("separation", 12)
+	_settings_panel.add_child(_settings_box)
+
+
+func _open_settings() -> void:
+	_settings_reset_armed = false
+	_fill_settings()
+	_settings_panel.visible = true
+
+
+func _fill_settings() -> void:
+	for child in _settings_box.get_children():
+		child.queue_free()
+	var title := _make_label(32)
+	title.text = "Settings"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_settings_box.add_child(title)
+
+	_settings_heading("Scenery around the tavern")
+	var names: Dictionary = {"auto": "Auto", "meadow": "Meadow", "city": "City", "forest": "Fae\nForest"}
+	var row := HBoxContainer.new()
+	_settings_box.add_child(row)
+	for choice in GameManager.SCENERY_CHOICES:
+		var button := _make_button(names[choice], 21, row, 70)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.modulate = HIGHLIGHT if GameManager.setting_scenery == choice else Color.WHITE
+		button.pressed.connect(_set_scenery.bind(choice))
+	var note := _make_label(18)
+	note.text = "Auto: a meadow at the tavern, the city at the Grand Hall."
+	note.modulate = Color(0.8, 0.8, 0.8)
+	_settings_box.add_child(note)
+
+	_settings_heading("Game speed")
+	var speeds := HBoxContainer.new()
+	_settings_box.add_child(speeds)
+	for speed in GameManager.SPEED_CHOICES:
+		var label: String = "Normal" if speed == 1.0 else "x%s" % str(speed)
+		var button := _make_button(label, 22, speeds, 70)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.modulate = HIGHLIGHT if is_equal_approx(GameManager.setting_speed, speed) else Color.WHITE
+		button.pressed.connect(_set_speed.bind(speed))
+
+	_settings_heading("Start over")
+	var reset := _make_button("Tap again to erase your tavern" if _settings_reset_armed else "New Game", 22, _settings_box, 70)
+	reset.pressed.connect(_on_settings_reset)
+
+	var close := _make_button("Close", 26, _settings_box, 80)
+	close.pressed.connect(func(): _settings_panel.visible = false)
+
+
+func _settings_heading(text: String) -> void:
+	var label := _make_label(24)
+	label.text = "\n" + text
+	label.modulate = Color(1.0, 0.85, 0.5)
+	_settings_box.add_child(label)
+
+
+func _set_scenery(choice: String) -> void:
+	GameManager.setting_scenery = choice
+	GameManager.save_settings()
+	settings_changed.emit()
+	_fill_settings()
+
+
+func _set_speed(speed: float) -> void:
+	GameManager.setting_speed = speed
+	GameManager.save_settings()
+	_fill_settings()
+
+
+# Erasing a save can't be undone, so it takes two taps.
+func _on_settings_reset() -> void:
+	if not _settings_reset_armed:
+		_settings_reset_armed = true
+		_fill_settings()
+		return
+	new_game_requested.emit()
 
 
 # ---------------------------------------------------------------------
@@ -522,6 +621,15 @@ func _build_top_bar() -> void:
 	row2.add_child(_clock_label)
 	_staff_label = _make_label(22)
 	row2.add_child(_staff_label)
+	# Settings: a little gear at the end of the row.
+	var gear := Button.new()
+	gear.icon = preload("res://assets/ui/gear.png")
+	gear.expand_icon = true
+	gear.custom_minimum_size = Vector2(48, 44)
+	gear.flat = true
+	gear.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	gear.pressed.connect(_open_settings)
+	row2.add_child(gear)
 
 	_hint_label = _make_label(24)
 	_hint_label.text = _current_hint
@@ -836,9 +944,51 @@ func _build_plan_panel() -> void:
 	cancel.pressed.connect(func(): _plan_panel.visible = false)
 
 
+# Today's requests, with progress. New ones come each morning.
+func _add_requests() -> void:
+	var heading := _make_label(28)
+	heading.text = "\nToday's Requests"
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_recipe_list.add_child(heading)
+	if GameManager.today_requests.is_empty():
+		var none := _make_label(21)
+		none.text = "New requests come each morning when you open."
+		none.modulate = Color(0.8, 0.8, 0.8)
+		_recipe_list.add_child(none)
+		return
+	for request in GameManager.today_requests:
+		var row := HBoxContainer.new()
+		_recipe_list.add_child(row)
+		var label := _make_label(21)
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD
+		var reward: String = "+%dg" % request["gold"]
+		if request["fame"] > 0:
+			reward += ", +%d fame" % request["fame"]
+		label.text = "%s  (%s)" % [request["text"], reward]
+		row.add_child(label)
+		var progress := _make_label(21)
+		if request["done"]:
+			progress.text = "Done"
+			progress.modulate = Color(0.6, 1.0, 0.6)
+			label.modulate = Color(0.6, 1.0, 0.6)
+		elif request["failed"]:
+			progress.text = "Missed"
+			progress.modulate = Color(1.0, 0.5, 0.45)
+			label.modulate = Color(0.7, 0.7, 0.7)
+		elif request["kind"] == "calm":
+			progress.text = "So far so good"
+			progress.modulate = Color(1.0, 0.85, 0.5)
+		else:
+			progress.text = "%d/%d" % [request["have"], request["goal"]]
+			progress.modulate = Color(1.0, 0.85, 0.5)
+		row.add_child(progress)
+
+
 # The goals part of the book: your fame rank, what the next rank needs,
 # and every milestone with its progress.
 func _add_goals() -> void:
+	_add_requests()
 	var heading := _make_label(28)
 	heading.text = "\nFame and Milestones"
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -938,9 +1088,15 @@ func _refresh_people() -> void:
 		row.add_child(about)
 		var name_label := _make_label(26)
 		name_label.text = profile["name"]
+		if _people_mode == "staff":
+			# Their level as stars, and how close the next one is.
+			var lvl: int = StaffProfiles.level(profile)
+			name_label.text += "   Level %d" % lvl
 		about.add_child(name_label)
 		var job := _make_label(20)
-		job.text = "%s  %dg/day" % [info["title"], info["wage"]]
+		job.text = "%s  %dg/day" % [info["title"], StaffProfiles.wage(profile)]
+		if _people_mode == "staff":
+			job.text += "   " + StaffProfiles.xp_text(profile)
 		if _people_mode != "staff":
 			job.text += "  (hire: %dg)" % StaffProfiles.hiring_fee(profile)
 		job.modulate = Color(0.8, 0.8, 0.8)

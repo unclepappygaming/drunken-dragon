@@ -61,10 +61,7 @@ var _bubble: String = ""                     # what we're saying (the host's wel
 func setup(tavern_grid: TavernGrid, start_pos: Vector2, who: Dictionary) -> void:
 	_setup_walker(tavern_grid, start_pos)
 	profile = who
-	match profile["type"]:
-		"maid": speed = WALK_SPEED * 1.25
-		"halfling": speed = WALK_SPEED * 0.9
-		_: speed = WALK_SPEED
+	_apply_level()
 	sprite_sheet = StaffProfiles.SHEETS[profile["type"]]
 	material = StaffProfiles.material_for(profile)
 	# Pixel art stays crisp instead of blurry when scaled up.
@@ -94,7 +91,7 @@ func _process(delta: float) -> void:
 				_give_up()
 			elif _walk(delta):
 				state = State.TAKING_ORDER
-				_timer = ORDER_TAKE_TIME
+				_timer = _work_time(ORDER_TAKE_TIME)
 
 		State.TAKING_ORDER:
 			if not _guest_is(Customer.State.WAITING_FOR_WAITER):
@@ -103,6 +100,7 @@ func _process(delta: float) -> void:
 				_timer -= delta
 				if _timer <= 0.0:
 					_guest.take_order()
+					gain_xp()
 					if profile["type"] == "barkeep":
 						_guest.calm(SMOOTH_TALK_PATIENCE)
 					_guest = null
@@ -124,7 +122,10 @@ func _process(delta: float) -> void:
 			if not _guest_is(Customer.State.WAITING_FOR_FOOD):
 				_give_up()   # they left; the plate is wasted
 			elif _walk(delta):
-				if _guest.serve_food() and profile["type"] == "halfling" and randf() < LUCKY_CHANCE:
+				var served: bool = _guest.serve_food()
+				if served:
+					gain_xp()
+				if served and profile["type"] == "halfling" and randf() < LUCKY_CHANCE:
 					_guest.add_tip(LUCKY_TIP, "Lucky me! Big tip!")
 				_guest = null
 				state = State.IDLE
@@ -132,12 +133,13 @@ func _process(delta: float) -> void:
 		State.TO_TABLE:
 			if _walk(delta):
 				state = State.CLEARING
-				_timer = CLEAR_TIME
+				_timer = _work_time(CLEAR_TIME)
 
 		State.CLEARING:
 			_timer -= delta
 			if _timer <= 0.0:
 				if grid.clear_table(_table, self) > 0:
+					gain_xp()
 					go_to_cell(grid.expo_front())   # plates go back to the kitchen
 					state = State.RETURNING
 				else:
@@ -159,7 +161,7 @@ func _process(delta: float) -> void:
 				else:
 					GameManager.buy_ingredients(_guest.order)
 					state = State.POURING
-					_timer = POUR_TIME
+					_timer = _work_time(POUR_TIME)
 
 		State.GREETING:
 			_timer -= delta
@@ -191,6 +193,34 @@ func leave() -> void:
 	grid.release_plate_claim(self)
 	state = State.LEAVING
 	go_out_door()
+
+
+# Walking speed from their type and level.
+func _apply_level() -> void:
+	match profile["type"]:
+		"maid": speed = WALK_SPEED * 1.25
+		"halfling": speed = WALK_SPEED * 0.9
+		_: speed = WALK_SPEED
+	speed *= StaffProfiles.level_bonus(profile)
+
+
+# Seconds a task takes, shortened by their level.
+func _work_time(seconds: float) -> float:
+	return seconds / StaffProfiles.level_bonus(profile)
+
+
+# Experience for a job done; at a new level they get quicker.
+func gain_xp() -> void:
+	if StaffProfiles.add_xp(profile):
+		_apply_level()
+		_bubble = "Level up!"
+		get_tree().create_timer(2.0).timeout.connect(_clear_level_bubble)
+		GameManager.staff_levelled.emit(profile)
+
+
+func _clear_level_bubble() -> void:
+	if _bubble == "Level up!":
+		_bubble = ""
 
 
 func _find_task() -> void:
@@ -261,7 +291,8 @@ func _greet_someone() -> void:
 			face_toward(guest.position)
 			_bubble = ["Welcome!", "Right this way!", "Good evening!" if GameManager.minutes_since_open > 480 else "Good day!"].pick_random()
 			state = State.GREETING
-			_timer = GREET_TIME
+			_timer = _work_time(GREET_TIME)
+			gain_xp()
 			return
 
 

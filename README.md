@@ -218,6 +218,22 @@ erases the save (it asks twice).
 To make a web version: **Project → Export → Web → Export Project** (you'll be
 asked to download export templates the first time).
 
+## Daily requests, staff levels and settings
+
+- **Daily requests:** each morning brings 3 small goals for the day, such
+  as "Serve Honey Mead x8", "Serve 6 guests: Town Guard", "No walk-outs
+  before 14:00" or "Take in 900g today". They're sized from how yesterday
+  went. Meeting one pays gold at once, and some give +1 fame. See them in
+  Recipes & Goals.
+- **Staff levels:** staff gain experience for every job (cooks 2 per dish;
+  waiters 1 per order taken, plate served or table cleared; hosts per
+  greeting). Levels 2-5 come at 40, 120, 250 and 450 xp. Each level makes
+  them 6% faster at walking and working, and adds 8% to their wage. Your
+  Staff shows each person's level and xp.
+- **Settings** (the gear, top right): scenery around the tavern (Auto,
+  Meadow, City, Fae Forest), game speed (Normal, x1.5, x2), and New Game
+  (tap twice). Settings are kept separately from the save.
+
 ## Phone builds
 
 `export_presets.cfg` has three presets: Web, Android and iOS.

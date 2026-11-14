@@ -24,6 +24,8 @@ signal shop_opened(day: int)
 signal shop_closed(day: int)
 signal recipes_changed   # a recipe was unlocked or the menu changed
 signal rush_changed(rush_name: String)   # a rush began ("" = it ended)
+signal staff_levelled(profile: Dictionary)   # someone reached a new level
+signal request_done(request: Dictionary)     # one of today's requests was met
 
 # ---------------------------------------------------------------------
 # TUNING CONSTANTS — tweak these to change how the game feels.
@@ -292,6 +294,37 @@ var stats: Dictionary = {}
 
 var expansions_built: int = 0   # in the current location
 var location: String = "tavern"   # "tavern" or "grand_hall"
+var today_requests: Array = []   # today's requests (see roll_requests)
+
+# SETTINGS (Settings card): kept in their own file, so starting a new
+# game doesn't change them.
+const SETTINGS_PATH: String = "user://settings.cfg"
+const SCENERY_CHOICES: Array[String] = ["auto", "meadow", "city", "forest"]
+const SPEED_CHOICES: Array[float] = [1.0, 1.5, 2.0]
+var setting_scenery: String = "auto"   # "auto": meadow at the tavern, city at the Grand Hall
+var setting_speed: float = 1.0         # how fast the day runs
+
+
+func _ready() -> void:
+	load_settings()
+
+
+func load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) == OK:
+		var scenery: String = str(cfg.get_value("view", "scenery", "auto"))
+		setting_scenery = scenery if scenery in SCENERY_CHOICES else "auto"
+		var speed: float = float(cfg.get_value("play", "speed", 1.0))
+		setting_speed = speed if speed in SPEED_CHOICES else 1.0
+	Engine.time_scale = setting_speed
+
+
+func save_settings() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("view", "scenery", setting_scenery)
+	cfg.set_value("play", "speed", setting_speed)
+	cfg.save(SETTINGS_PATH)
+	Engine.time_scale = setting_speed
 var floor_style: String = "boards"   # keys of ROOM_STYLES
 var wall_style: String = "timber"
 
@@ -339,6 +372,7 @@ func _process(delta: float) -> void:
 	# Only broadcast when the displayed minute actually changes.
 	if total_minutes != _last_minute_shown:
 		_last_minute_shown = total_minutes
+		_check_calm_request(total_minutes)
 		clock_changed.emit(floori(total_minutes / 60.0), total_minutes % 60)
 
 	var rush: String = current_rush().get("name", "")
@@ -376,6 +410,7 @@ func open_shop(banquet: bool = false) -> void:
 	today_fae = 0
 	today_fae_happy = 0
 	today_event = _roll_event(banquet)
+	roll_requests()
 	shop_opened.emit(day)
 
 
@@ -413,6 +448,7 @@ func earn(amount: int) -> void:
 	gold += amount
 	today_income += amount
 	gold_changed.emit(gold)
+	_request_progress("income", "", today_income, true)
 
 
 # Put everything back to a brand-new game (used by "New Game").
@@ -441,6 +477,7 @@ func reset() -> void:
 	location = "tavern"
 	floor_style = "boards"
 	wall_style = "timber"
+	today_requests.clear()
 	_applicants_day = -1
 	order_requests.clear()
 	order_queue.clear()
@@ -650,6 +687,11 @@ func add_stat(key: String, amount: int = 1) -> void:
 func record_served(order_id: String, noble: bool, guest_type: String = "") -> void:
 	add_stat("served")
 	add_stat("dish:" + order_id)
+	_request_progress("dish", order_id)
+	_request_progress("guest", guest_type)
+	_request_progress("served", "")
+	if current_rush().get("name", "") == "Dinner rush":
+		_request_progress("rush", "")
 	if guest_type != "":
 		add_stat("guest:" + guest_type)
 	if noble:
@@ -658,6 +700,9 @@ func record_served(order_id: String, noble: bool, guest_type: String = "") -> vo
 
 # Called once the last guest has left for the night.
 func finish_day() -> void:
+	# Tomorrow's requests are sized from how today went.
+	stats["last_served"] = today_served
+	stats["last_income"] = today_income
 	if today_walkouts == 0 and today_served >= PERFECT_DAY_GUESTS:
 		add_stat("perfect_days")
 
@@ -917,6 +962,89 @@ func change_fame(amount: int) -> void:
 	fame = max(0, fame + amount)   # fame never goes below zero
 	stats["best_fame"] = maxi(stat("best_fame"), fame)
 	fame_changed.emit(fame)
+
+
+# ---------------------------------------------------------------------
+# DAILY REQUESTS: each morning REQUEST_COUNT small goals for the day
+# ("Serve Honey Mead x8", "No walk-outs before 14:00"...), sized from how
+# yesterday went. Meeting one pays gold right away (some give fame too).
+# ---------------------------------------------------------------------
+const REQUEST_COUNT: int = 3
+
+
+func roll_requests() -> void:
+	today_requests.clear()
+	var served: int = maxi(stat("last_served"), 12)
+	var income: int = maxi(stat("last_income"), 150)
+	var pay: int = maxi(30, snappedi(int(income * 0.08), 5))
+	var pool: Array = []
+	if not menu.is_empty():
+		var dish: String = menu.pick_random()
+		var goal: int = clampi(roundi(served * 0.8 / menu.size()), 3, 25)
+		pool.append({"kind": "dish", "key": dish, "goal": goal, "gold": pay, "fame": 0,
+				"text": "Serve %s x%d" % [RECIPES[dish]["name"], goal]})
+	var types: Array = []
+	for a in GuestTypes.ARRIVALS:
+		if fame >= a["fame"] and a["type"] in ["farmer", "guard", "merchant", "adventurer", "miner", "wizard"]:
+			types.append(a["type"])
+	if not types.is_empty():
+		var type: String = types.pick_random()
+		var goal: int = clampi(roundi(served * 0.18), 3, 15)
+		pool.append({"kind": "guest", "key": type, "goal": goal, "gold": pay, "fame": 0,
+				"text": "Serve %d guests: %s" % [goal, GuestTypes.TYPES[type]["title"]]})
+	var more: int = maxi(served + 2, roundi(served * 1.1))
+	pool.append({"kind": "served", "key": "", "goal": more, "gold": pay, "fame": 1,
+			"text": "Serve %d guests today" % more})
+	var calm_hour: int = 14 if fame < 40 else 20
+	pool.append({"kind": "calm", "key": "", "goal": calm_hour, "gold": pay, "fame": 1,
+			"text": "No walk-outs before %d:00" % calm_hour})
+	var rush_goal: int = maxi(5, roundi(served * 0.3))
+	pool.append({"kind": "rush", "key": "", "goal": rush_goal, "gold": pay, "fame": 0,
+			"text": "Serve %d guests in the dinner rush" % rush_goal})
+	var target: int = snappedi(int(income * 1.1), 10)
+	pool.append({"kind": "income", "key": "", "goal": target, "gold": pay, "fame": 1,
+			"text": "Take in %dg today" % target})
+	pool.shuffle()
+	for i in mini(REQUEST_COUNT, pool.size()):
+		var request: Dictionary = pool[i]
+		request["have"] = 0
+		request["done"] = false
+		request["failed"] = false
+		today_requests.append(request)
+
+
+# One step closer on matching requests (or, with `absolute`, progress set
+# to `amount`).
+func _request_progress(kind: String, key: String, amount: int = 1, absolute: bool = false) -> void:
+	for request in today_requests:
+		if request["kind"] != kind or request["key"] != key or request["done"] or request["failed"]:
+			continue
+		request["have"] = amount if absolute else request["have"] + amount
+		if request["have"] >= request["goal"]:
+			_complete_request(request)
+
+
+func _complete_request(request: Dictionary) -> void:
+	request["done"] = true
+	request["have"] = request["goal"]
+	if request["fame"] > 0:
+		change_fame(request["fame"])
+	request_done.emit(request)
+	earn(request["gold"])   # last: earning can complete an income request too
+
+
+# Called by main.gd when someone storms out.
+func note_walkout() -> void:
+	for request in today_requests:
+		if request["kind"] == "calm" and not request["done"]:
+			request["failed"] = true
+
+
+func _check_calm_request(total_minutes: int) -> void:
+	for request in today_requests:
+		if request["kind"] == "calm" and not request["done"] and not request["failed"] \
+				and total_minutes >= request["goal"] * 60:
+			_complete_request(request)
 
 
 # The rush happening right now, or {} if none.

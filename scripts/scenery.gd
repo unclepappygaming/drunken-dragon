@@ -106,6 +106,8 @@ func refresh() -> void:
 
 # The look for where the tavern is: the Grand Hall is in the capital.
 static func style_for_location() -> String:
+	if GameManager.setting_scenery != "auto":
+		return GameManager.setting_scenery   # chosen in Settings
 	return "city" if GameManager.in_hall() else DEFAULT_STYLE
 
 
