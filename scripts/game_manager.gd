@@ -976,7 +976,7 @@ func roll_requests() -> void:
 	today_requests.clear()
 	var served: int = maxi(stat("last_served"), 12)
 	var income: int = maxi(stat("last_income"), 150)
-	var pay: int = maxi(30, snappedi(int(income * 0.08), 5))
+	var pay: int = maxi(25, snappedi(int(income * 0.06), 5))
 	var pool: Array = []
 	if not menu.is_empty():
 		var dish: String = menu.pick_random()
@@ -993,16 +993,16 @@ func roll_requests() -> void:
 		pool.append({"kind": "guest", "key": type, "goal": goal, "gold": pay, "fame": 0,
 				"text": "Serve %d guests: %s" % [goal, GuestTypes.TYPES[type]["title"]]})
 	var more: int = maxi(served + 2, roundi(served * 1.1))
-	pool.append({"kind": "served", "key": "", "goal": more, "gold": pay, "fame": 1,
+	pool.append({"kind": "served", "key": "", "goal": more, "gold": pay, "fame": 0,
 			"text": "Serve %d guests today" % more})
 	var calm_hour: int = 14 if fame < 40 else 20
-	pool.append({"kind": "calm", "key": "", "goal": calm_hour, "gold": pay, "fame": 1,
+	pool.append({"kind": "calm", "key": "", "goal": calm_hour, "gold": pay, "fame": 0,
 			"text": "No walk-outs before %d:00" % calm_hour})
 	var rush_goal: int = maxi(5, roundi(served * 0.3))
 	pool.append({"kind": "rush", "key": "", "goal": rush_goal, "gold": pay, "fame": 0,
 			"text": "Serve %d guests in the dinner rush" % rush_goal})
 	var target: int = snappedi(int(income * 1.1), 10)
-	pool.append({"kind": "income", "key": "", "goal": target, "gold": pay, "fame": 1,
+	pool.append({"kind": "income", "key": "", "goal": target, "gold": pay, "fame": 0,
 			"text": "Take in %dg today" % target})
 	pool.shuffle()
 	for i in mini(REQUEST_COUNT, pool.size()):

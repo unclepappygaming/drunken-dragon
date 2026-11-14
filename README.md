@@ -223,7 +223,7 @@ asked to download export templates the first time).
 - **Daily requests:** each morning brings 3 small goals for the day, such
   as "Serve Honey Mead x8", "Serve 6 guests: Town Guard", "No walk-outs
   before 14:00" or "Take in 900g today". They're sized from how yesterday
-  went. Meeting one pays gold at once, and some give +1 fame. See them in
+  went. Meeting one pays gold at once. See them in
   Recipes & Goals.
 - **Staff levels:** staff gain experience for every job (cooks 2 per dish;
   waiters 1 per order taken, plate served or table cleared; hosts per
